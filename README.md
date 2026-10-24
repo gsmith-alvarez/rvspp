@@ -1,5 +1,9 @@
 # RVS++ (RISC-V Visual Simulator++)
 
+[![Vibe-Ware](https://img.shields.io/badge/status-vibe--ware-magenta.svg)](#vibe-ware-notice)
+
+> **Vibe-Ware Notice**: This project is **vibe-ware** — rapidly designed and iterated with AI-assisted engineering, refactored into a clean production Rust architecture, and verified for full behavioral and assembly parity against the original RVS reference simulator.
+
 [![Release](https://img.shields.io/badge/version-1.0.0-cyan.svg)](https://github.com/gsmith-alvarez/rvspp/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
