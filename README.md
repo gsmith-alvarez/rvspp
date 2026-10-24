@@ -73,6 +73,59 @@ To uninstall:
 ```bash
 cargo uninstall rvs-tui
 ```
+---
+
+## CLI & Headless Batch Execution
+
+In addition to the interactive TUI, `rvs` functions as a headless CLI execution tool. This is ideal for CI/CD pipelines, automated testing, scripting, and course autograding.
+
+Batch mode automatically activates whenever `--batch` (or `-b`) is passed, or when 3 or more positional arguments are supplied.
+
+### Usage
+
+```bash
+rvs [--batch] <asm_file> <input_file> <output_file> [timeout_ms]
+```
+
+Or via the local runner script:
+```bash
+./run.sh --batch <asm_file> <input_file> <output_file> [timeout_ms]
+```
+
+### Arguments & Options
+
+| Parameter | Description |
+| :--- | :--- |
+| `<asm_file>` | Path to the RISC-V assembly source file to assemble and run (e.g. `solution.s`). |
+| `<input_file>` | Text file containing stdin input lines to be consumed by interactive `ECALL 5..9` (integer, float, string, char) or DMA input requests. Pass an empty file (e.g. `/dev/null`) if no input is expected. |
+| `<output_file>` | Destination file where the comprehensive simulator execution report is written. |
+| `[timeout_ms]` | *(Optional)* Maximum execution time in milliseconds before halting (default: `3000` ms). Protects against infinite loops. |
+| `-b, --batch` | Explicitly flag batch mode. |
+| `-t, --timeout <ms>` | Execution timeout in milliseconds (default: `3000`). |
+| `-h, --help` | Print CLI help information and exit. |
+| `-V, --version` | Print version information and exit. |
+
+### Example: Autograding & Automated Testing
+
+```bash
+# Run headless simulation with a 5000ms timeout
+rvs --batch tests/differential/t1.asm tests/differential/t1.in.txt report.txt 5000
+
+# Inspect exit status in shell scripts
+if [ $? -eq 0 ]; then
+    echo "Simulation completed successfully. Report generated at report.txt"
+fi
+```
+
+### Report Output Structure
+The generated `<output_file>` contains the standard complete evaluation record:
+1. **`Load <asm_file>`**: Verbatim source code loaded.
+2. **`Compile`**: Assembly listing with machine encodings, addresses, and symbol table.
+3. **Initial `MEMORY`**: Initial state of all `DD` data cells before execution.
+4. **`Run`**: Instruction-by-instruction execution log from `START` to `ebreak` or halt.
+5. **Final `MEMORY`**: State of memory after execution.
+6. **Final `REGISTERS`**: Full integer (`x0`–`x31`) and float (`f0`–`f31`) register file contents.
+7. **`OUTPUT`**: Accumulated output text emitted by `ecall` (syscalls 0–4) and DMA output.
 
 ---
 
@@ -223,4 +276,5 @@ rvs/
 
 ## License
 
-MIT License. See [Cargo.toml](Cargo.toml).
+- **Rust Workspace (`crates/rvs-core`, `crates/rvs-tui`)**: Released under the **MIT License**. See [Cargo.toml](Cargo.toml).
+- **Reference Implementation (`src/RVS046.tcl`)**: Copyright (c) 2019 SIDIC. Distributed under SIDIC's educational not-for-profit license (see lines 321–325 of `src/RVS046.tcl`).
