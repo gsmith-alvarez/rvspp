@@ -118,7 +118,11 @@ impl Editor {
     }
 
     pub fn needs_save(&self) -> bool {
-        self.modified && self.lines.iter().any(|l| !l.trim_matches(['\n', '\r']).is_empty())
+        self.modified
+            && self
+                .lines
+                .iter()
+                .any(|l| !l.trim_matches(['\n', '\r']).is_empty())
     }
 
     fn push_undo(&mut self) {
@@ -184,8 +188,6 @@ impl Editor {
             self.col = self.lines[self.row].chars().count();
             self.lines[self.row].push_str(&cur);
             self.modified = true;
-        } else {
-            return;
         }
     }
 
@@ -199,10 +201,20 @@ impl Editor {
         let chars: Vec<char> = line.chars().collect();
         self.col = self.col.min(chars.len());
         let mut new_col = self.col;
-        while new_col > 0 && chars.get(new_col - 1).map(|c| c.is_whitespace()).unwrap_or(false) {
+        while new_col > 0
+            && chars
+                .get(new_col - 1)
+                .map(|c| c.is_whitespace())
+                .unwrap_or(false)
+        {
             new_col -= 1;
         }
-        while new_col > 0 && chars.get(new_col - 1).map(|c| !c.is_whitespace()).unwrap_or(false) {
+        while new_col > 0
+            && chars
+                .get(new_col - 1)
+                .map(|c| !c.is_whitespace())
+                .unwrap_or(false)
+        {
             new_col -= 1;
         }
         new_col = snap_boundary(line, new_col);
@@ -301,6 +313,61 @@ impl Editor {
             self.row = s.row;
             self.col = s.col;
             self.clamp_cursor();
+        }
+    }
+
+    /// Every `(row, char_col)` where `needle` starts, in buffer order.
+    fn matches_of(&self, needle: &str) -> Vec<(usize, usize)> {
+        let ndl: Vec<char> = needle.chars().collect();
+        if ndl.is_empty() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for (row, line) in self.lines.iter().enumerate() {
+            let hay: Vec<char> = line.chars().collect();
+            if hay.len() < ndl.len() {
+                continue;
+            }
+            for col in 0..=hay.len() - ndl.len() {
+                if hay[col..col + ndl.len()] == ndl[..] {
+                    out.push((row, col));
+                }
+            }
+        }
+        out
+    }
+
+    /// Move the cursor to the next (`forward`) or previous occurrence of
+    /// `needle`, wrapping at the ends. Returns false when there is no match.
+    pub fn find(&mut self, needle: &str, forward: bool) -> bool {
+        if self.lines.is_empty() {
+            return false;
+        }
+        let matches = self.matches_of(needle);
+        if matches.is_empty() {
+            return false;
+        }
+        let here = (self.row, self.col);
+        let target = if forward {
+            matches
+                .iter()
+                .find(|&&pos| pos > here)
+                .or_else(|| matches.first())
+        } else {
+            matches
+                .iter()
+                .rev()
+                .find(|&&pos| pos < here)
+                .or_else(|| matches.last())
+        };
+        match target {
+            Some(&(row, col)) => {
+                self.row = row;
+                self.col = snap_boundary(&self.lines[row], col);
+                self.clamp_cursor();
+                true
+            }
+            None => false,
         }
     }
 

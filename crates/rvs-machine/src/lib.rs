@@ -309,6 +309,10 @@ pub trait Machine: Sized {
     fn restore(&mut self, snapshot: &Self::Snapshot);
     fn changes_since(&self, snapshot: &Self::Snapshot) -> RegisterChanges;
 
+    /// Called when the app drops a snapshot from its history ring: any
+    /// resources pinned by that snapshot may be released.
+    fn forget(&mut self, _snapshot: &Self::Snapshot) {}
+
     /// Build one frame of renderable state.
     fn view(&self, request: &ViewRequest) -> ViewState;
 
@@ -317,6 +321,11 @@ pub trait Machine: Sized {
 
     fn dialect(&self) -> Dialect;
     fn set_dialect(&mut self, _dialect: Dialect) {}
+
+    /// Guess a freshly loaded file's dialect from its own syntax.
+    fn detect_dialect(&self, _source: &str) -> Dialect {
+        Dialect::Rvs
+    }
 
     fn convention_enabled(&self) -> bool {
         false
@@ -338,6 +347,33 @@ pub trait Machine: Sized {
         0
     }
     fn reset_pc(&mut self);
+
+    /// Value of the cell at `addr` (0 when absent), for watchpoints.
+    fn peek_mem(&self, _addr: u64) -> u64 {
+        0
+    }
+
+    /// Evaluate a user expression (breakpoint conditions) against current
+    /// register/memory state. `None` when the expression cannot be evaluated.
+    fn eval_expr(&self, _expr: &str) -> Option<i64> {
+        None
+    }
+
+    /// Does the instruction at the PC write a link register (i.e. is a call)?
+    fn at_call(&self) -> bool {
+        false
+    }
+
+    /// Where the current function returns to, for `:finish`.
+    fn return_address(&self) -> Option<u64> {
+        None
+    }
+
+    /// Is the `a7` syscall convention active? (`:abi a7`)
+    fn a7_abi(&self) -> bool {
+        false
+    }
+    fn set_a7_abi(&mut self, _on: bool) {}
     fn refresh_listing(&mut self) {}
 
     /// Address of a source line (0-based), used for source-pane breakpoints.

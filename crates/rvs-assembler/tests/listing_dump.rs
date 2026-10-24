@@ -21,7 +21,10 @@ done:   bge  x1, x2, start
     let second = dump(&mut sim);
 
     assert_eq!(first, second);
-    assert!(!second.contains("ERROR"), "unexpected error in listing:\n{second}");
+    assert!(
+        !second.contains("ERROR"),
+        "unexpected error in listing:\n{second}"
+    );
 }
 
 #[test]

@@ -141,8 +141,8 @@ impl FileExplorerState {
             }
         }
 
-        dirs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-        files.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        dirs.sort_by_key(|a| a.name.to_lowercase());
+        files.sort_by_key(|a| a.name.to_lowercase());
 
         self.entries.extend(dirs);
         self.entries.extend(files);
@@ -155,9 +155,13 @@ impl FileExplorerState {
         if self.entries.is_empty() {
             self.preview_title = "No preview available".to_string();
             if !self.base_dir.exists() {
-                self.preview_lines.push(format!("Directory does not exist: {}", self.base_dir.display()));
+                self.preview_lines.push(format!(
+                    "Directory does not exist: {}",
+                    self.base_dir.display()
+                ));
             } else {
-                self.preview_lines.push("No matching files or directories found.".to_string());
+                self.preview_lines
+                    .push("No matching files or directories found.".to_string());
             }
             return;
         }
@@ -165,7 +169,8 @@ impl FileExplorerState {
         let item = &self.entries[self.selected];
         if item.name == ".." {
             self.preview_title = "Parent Directory (..)".to_string();
-            self.preview_lines.push("Select to navigate up to parent directory.".to_string());
+            self.preview_lines
+                .push("Select to navigate up to parent directory.".to_string());
             return;
         }
 
@@ -174,10 +179,17 @@ impl FileExplorerState {
             match std::fs::read_dir(&item.full_path) {
                 Ok(read) => {
                     let mut sub_entries: Vec<_> = read.filter_map(Result::ok).collect();
-                    sub_entries.sort_by_key(|e| (e.file_type().map(|t| !t.is_dir()).unwrap_or(true), e.file_name()));
+                    sub_entries.sort_by_key(|e| {
+                        (
+                            e.file_type().map(|t| !t.is_dir()).unwrap_or(true),
+                            e.file_name(),
+                        )
+                    });
                     let count = sub_entries.len();
-                    self.preview_lines.push(format!("Directory contains {count} items:"));
-                    self.preview_lines.push("────────────────────────────────────".to_string());
+                    self.preview_lines
+                        .push(format!("Directory contains {count} items:"));
+                    self.preview_lines
+                        .push("────────────────────────────────────".to_string());
                     for sub in sub_entries.into_iter().take(30) {
                         let name = sub.file_name().to_string_lossy().into_owned();
                         let is_d = sub.file_type().map(|t| t.is_dir()).unwrap_or(false);
@@ -185,15 +197,18 @@ impl FileExplorerState {
                             self.preview_lines.push(format!("  [DIR]  {name}/"));
                         } else {
                             let sz = sub.metadata().map(|m| m.len()).unwrap_or(0);
-                            self.preview_lines.push(format!("  [FILE] {name:<26} {:>8}", format_size(sz)));
+                            self.preview_lines
+                                .push(format!("  [FILE] {name:<26} {:>8}", format_size(sz)));
                         }
                     }
                     if count > 30 {
-                        self.preview_lines.push(format!("... and {} more items", count - 30));
+                        self.preview_lines
+                            .push(format!("... and {} more items", count - 30));
                     }
                 }
                 Err(e) => {
-                    self.preview_lines.push(format!("Error reading directory: {e}"));
+                    self.preview_lines
+                        .push(format!("Error reading directory: {e}"));
                 }
             }
         } else {
@@ -202,9 +217,11 @@ impl FileExplorerState {
                 Ok(bytes) => {
                     // Check if binary file (presence of null bytes in first 1KB)
                     let check_len = bytes.len().min(1024);
-                    if bytes[..check_len].iter().any(|&b| b == 0) {
-                        self.preview_lines.push(format!("[Binary file - {} bytes]", bytes.len()));
-                        self.preview_lines.push("Binary contents cannot be previewed.".to_string());
+                    if bytes[..check_len].contains(&0) {
+                        self.preview_lines
+                            .push(format!("[Binary file - {} bytes]", bytes.len()));
+                        self.preview_lines
+                            .push("Binary contents cannot be previewed.".to_string());
                     } else {
                         match std::str::from_utf8(&bytes) {
                             Ok(text) => {
@@ -214,14 +231,17 @@ impl FileExplorerState {
                                     self.preview_lines.push(format!("{:>3} │ {}", i + 1, line));
                                 }
                                 if total > 80 {
-                                    self.preview_lines.push(format!("... (file has {total} lines, preview truncated)"));
+                                    self.preview_lines.push(format!(
+                                        "... (file has {total} lines, preview truncated)"
+                                    ));
                                 }
                                 if self.preview_lines.is_empty() {
                                     self.preview_lines.push("[Empty file]".to_string());
                                 }
                             }
                             Err(_) => {
-                                self.preview_lines.push("[Binary or non-UTF8 encoded file]".to_string());
+                                self.preview_lines
+                                    .push("[Binary or non-UTF8 encoded file]".to_string());
                             }
                         }
                     }
@@ -298,7 +318,9 @@ impl FileExplorerState {
             return None;
         }
 
-        let parent_display = if self.dir_display_prefix.is_empty() || self.dir_display_prefix == "./" {
+        let parent_display = if self.dir_display_prefix.is_empty()
+            || self.dir_display_prefix == "./"
+        {
             "../".to_string()
         } else if self.dir_display_prefix.ends_with("/../") || self.dir_display_prefix == "../" {
             format!("{}../", self.dir_display_prefix)
@@ -360,7 +382,9 @@ impl FileExplorerState {
     }
 
     pub fn selected_is_dir(&self) -> bool {
-        self.selected_item().map(|item| item.is_dir).unwrap_or(false)
+        self.selected_item()
+            .map(|item| item.is_dir)
+            .unwrap_or(false)
     }
 
     /// Tab-completion: complete path with active suggestion or directory.
@@ -405,7 +429,10 @@ pub fn parse_path_input(input: &str) -> (PathBuf, String, String) {
     let (expanded_str, was_tilde) = if raw == "~" {
         (expand_home(), true)
     } else if let Some(rest) = raw.strip_prefix("~/") {
-        (format!("{}/{}", expand_home().trim_end_matches('/'), rest), true)
+        (
+            format!("{}/{}", expand_home().trim_end_matches('/'), rest),
+            true,
+        )
     } else {
         (raw.to_string(), false)
     };
@@ -422,7 +449,7 @@ pub fn parse_path_input(input: &str) -> (PathBuf, String, String) {
         return (path, String::new(), display);
     }
 
-    if let Some(pos) = raw.rfind(|c| c == '/' || c == '\\') {
+    if let Some(pos) = raw.rfind(['/', '\\']) {
         let dir_display_part = &raw[..=pos];
         let file_part = &raw[pos + 1..];
 
@@ -435,7 +462,11 @@ pub fn parse_path_input(input: &str) -> (PathBuf, String, String) {
         };
 
         let base_dir = PathBuf::from(expanded_dir_part);
-        (base_dir, file_part.to_string(), dir_display_part.to_string())
+        (
+            base_dir,
+            file_part.to_string(),
+            dir_display_part.to_string(),
+        )
     } else {
         (PathBuf::from("."), raw.to_string(), String::new())
     }

@@ -17,13 +17,38 @@ pub struct RiscV {
     sim: Simulator,
 }
 
-/// Reverse-step state: exactly the reference's undo unit.
+/// Cut a growing log back to a recorded byte length (no-op when it is already
+/// shorter, which happens after a partial restore).
+fn truncate_to(s: &mut String, len: usize) {
+    if s.len() > len {
+        s.truncate(len);
+    }
+}
+
+/// Append one expression token, substituting registers with their current
+/// value. Hex literals (`0x1000`) are left alone.
+fn push_expr_token(out: &mut String, token: &str, m: &RiscV) {
+    if token.is_empty() {
+        return;
+    }
+    let is_hex_digits = token.starts_with("0x") || token.starts_with("0X");
+    match rvs_regs::parse_reg(token) {
+        Some(idx) if !is_hex_digits => {
+            out.push_str(&m.sim.regs.read_x(idx).to_string());
+        }
+        _ => out.push_str(token),
+    }
+}
+
+/// Reverse-step state: registers plus a mark into the memory undo journal.
+/// Memory and the trace are not copied — that is what keeps stepping O(1) in
+/// program size instead of O(state).
 #[derive(Clone)]
 pub struct RiscVSnapshot {
     regs: rvs_regs::RegisterFile,
-    mem: rvs_memory::Memory,
-    exec_log: String,
-    output: String,
+    mem_mark: u64,
+    exec_log_len: usize,
+    output_len: usize,
     pc: u64,
 }
 
@@ -95,6 +120,9 @@ impl Machine for RiscV {
         self.sim.source = source.to_string();
         self.sim.exec_log.clear();
         self.sim.output.clear();
+        // A compile is not an undoable step: start a fresh journal so reverse
+        // stepping only ever rewinds execution of the current program.
+        self.sim.mem.start_journal();
         outcome
     }
 
@@ -137,19 +165,25 @@ impl Machine for RiscV {
     fn snapshot(&self) -> Self::Snapshot {
         RiscVSnapshot {
             regs: self.sim.regs.clone(),
-            mem: self.sim.mem.clone(),
-            exec_log: self.sim.exec_log.clone(),
-            output: self.sim.output.clone(),
+            mem_mark: self.sim.mem.journal_mark(),
+            exec_log_len: self.sim.exec_log.len(),
+            output_len: self.sim.output.len(),
             pc: self.sim.regs.pc,
         }
     }
 
     fn restore(&mut self, snapshot: &Self::Snapshot) {
         self.sim.regs = snapshot.regs.clone();
-        self.sim.mem = snapshot.mem.clone();
-        self.sim.exec_log = snapshot.exec_log.clone();
-        self.sim.output = snapshot.output.clone();
+        self.sim.mem.journal_rewind_to(snapshot.mem_mark);
+        truncate_to(&mut self.sim.exec_log, snapshot.exec_log_len);
+        truncate_to(&mut self.sim.output, snapshot.output_len);
         self.sim.regs.pc = snapshot.pc;
+    }
+
+    fn forget(&mut self, snapshot: &Self::Snapshot) {
+        // The app dropped this snapshot out of its ring buffer: the entries it
+        // would have rewound to can never be needed again.
+        self.sim.mem.journal_drop_before(snapshot.mem_mark);
     }
 
     fn changes_since(&self, snapshot: &Self::Snapshot) -> RegisterChanges {
@@ -199,6 +233,73 @@ impl Machine for RiscV {
         self.sim.dialect = match dialect {
             Dialect::Rvs => rvs_transpile::AssemblyDialect::Rvs,
             Dialect::Gnu => rvs_transpile::AssemblyDialect::Gnu,
+        };
+    }
+
+    fn detect_dialect(&self, source: &str) -> Dialect {
+        match rvs_transpile::detect_dialect(source) {
+            rvs_transpile::AssemblyDialect::Rvs => Dialect::Rvs,
+            rvs_transpile::AssemblyDialect::Gnu => Dialect::Gnu,
+        }
+    }
+
+    fn peek_mem(&self, addr: u64) -> u64 {
+        match self.sim.mem.cells.get(&(addr / 8 * 8)) {
+            Some(rvs_memory::MemoryCell::Data { value, .. }) => *value,
+            _ => 0,
+        }
+    }
+
+    fn eval_expr(&self, expr: &str) -> Option<i64> {
+        // Registers first (`x1`, `a0`, `t3` ...), then labels, then Tcl `expr`
+        // semantics — so `:b loop if a0 == 3` works like a debugger condition.
+        let mut expanded = String::with_capacity(expr.len() + 16);
+        let mut token = String::new();
+        for c in expr.chars() {
+            if c.is_alphanumeric() || c == '_' || c == '.' {
+                token.push(c);
+                continue;
+            }
+            push_expr_token(&mut expanded, &token, self);
+            token.clear();
+            expanded.push(c);
+        }
+        push_expr_token(&mut expanded, &token, self);
+        rvs_asm_syntax::slbl(&expanded, &self.sim.sym).and_then(|v| i64::try_from(v).ok())
+    }
+
+    fn at_call(&self) -> bool {
+        let pc = self.sim.regs.pc;
+        match self.sim.mem.cells.get(&pc) {
+            Some(rvs_memory::MemoryCell::Instruction(c)) => {
+                let op = c.op.to_ascii_uppercase();
+                (op == "JAL" || op == "JALR")
+                    && c.args
+                        .first()
+                        .map(|r| r != "x0" && r != "zero")
+                        .unwrap_or(false)
+            }
+            _ => false,
+        }
+    }
+
+    fn return_address(&self) -> Option<u64> {
+        if let Some(frame) = self.sim.convention.call_stack.last() {
+            return Some(frame.call_pc.wrapping_add(4));
+        }
+        let ra = self.sim.regs.read_x(1);
+        (ra != 0).then_some(ra)
+    }
+
+    fn a7_abi(&self) -> bool {
+        self.sim.ecall_abi == rvs_sim::EcallAbi::A7
+    }
+
+    fn set_a7_abi(&mut self, on: bool) {
+        self.sim.ecall_abi = if on {
+            rvs_sim::EcallAbi::A7
+        } else {
+            rvs_sim::EcallAbi::Rvs
         };
     }
 
@@ -264,7 +365,7 @@ impl Machine for RiscV {
                 })
                 .collect(),
             sp,
-            aligned: sp % 16 == 0,
+            aligned: sp.is_multiple_of(16),
         }
     }
 
@@ -407,7 +508,8 @@ impl Machine for RiscV {
         out: &std::path::Path,
         timeout_ms: u64,
     ) -> Result<(), String> {
-        rvs_format::run_batch_file(asm, input, out, timeout_ms)
+        rvs_format::run_batch_file(asm, input, out, timeout_ms, rvs_format::BatchOptions::new())
+            .map(|_| ())
     }
 
     fn transpile(&mut self, source: &str, target: Dialect) -> Option<String> {
@@ -881,12 +983,47 @@ fn build_table_header(cols: &[(&str, usize)]) -> (RichLine, RichLine) {
     )
 }
 
+/// Everything the CLI hands to a batch run.
+#[derive(Clone, Debug)]
+pub struct BatchRequest<'a> {
+    /// `None` = detect from the source.
+    pub dialect: Option<rvs_machine::Dialect>,
+    pub trace: bool,
+    pub json: Option<&'a std::path::Path>,
+    pub a7: bool,
+}
+
+impl Default for BatchRequest<'_> {
+    fn default() -> Self {
+        Self {
+            dialect: None,
+            trace: true,
+            json: None,
+            a7: false,
+        }
+    }
+}
+
 /// CLI batch entry point. Kept here so the TUI binary has no engine dependency.
 pub fn run_batch_file(
     asm: &std::path::Path,
     input: &std::path::Path,
     out: &std::path::Path,
     timeout_ms: u64,
-) -> Result<(), String> {
-    rvs_format::run_batch_file(asm, input, out, timeout_ms)
+    req: BatchRequest<'_>,
+) -> Result<rvs_format::BatchReport, String> {
+    let opts = rvs_format::BatchOptions {
+        dialect: req.dialect.map(|d| match d {
+            rvs_machine::Dialect::Rvs => rvs_transpile::AssemblyDialect::Rvs,
+            rvs_machine::Dialect::Gnu => rvs_transpile::AssemblyDialect::Gnu,
+        }),
+        trace: req.trace,
+        json: req.json.map(|p| p.to_path_buf()),
+        abi: if req.a7 {
+            rvs_sim::EcallAbi::A7
+        } else {
+            rvs_sim::EcallAbi::Rvs
+        },
+    };
+    rvs_format::run_batch_file(asm, input, out, timeout_ms, opts)
 }

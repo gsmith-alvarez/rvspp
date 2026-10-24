@@ -68,7 +68,9 @@ impl<M: Machine> AppCommands for App<M> {
                     self.command_input.pop();
                 }
             }
-            KeyCode::Char(c) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
+            KeyCode::Char(c)
+                if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
+            {
                 self.command_input.push(c);
             }
             _ => {}
@@ -76,8 +78,9 @@ impl<M: Machine> AppCommands for App<M> {
     }
 
     fn execute_command(&mut self) {
-        let cmd = self.command_input.trim();
-        let cmd = cmd.strip_prefix(':').unwrap_or(cmd).trim();
+        // Own the text: some arms mutate `self` (and therefore `command_input`).
+        let cmd_owned = self.command_input.trim().to_string();
+        let cmd = cmd_owned.strip_prefix(':').unwrap_or(&cmd_owned).trim();
         if cmd.is_empty() {
             return;
         }
@@ -133,7 +136,7 @@ impl<M: Machine> AppCommands for App<M> {
             }
             "c" | "compile" => self.compile(),
             "s" | "start" => self.action_start(),
-            "n" | "next" | "step" => {
+            "n" | "step" => {
                 let count = args.parse::<usize>().unwrap_or(1).max(1);
                 for _ in 0..count {
                     self.action_next();
@@ -142,6 +145,30 @@ impl<M: Machine> AppCommands for App<M> {
                     }
                 }
             }
+            // `:next` steps *over* calls; `:n` keeps its "step N" meaning.
+            "next" | "over" | "stepover" => self.step_over(),
+            "finish" | "out" | "stepout" | "return" => self.step_out(),
+            "search" | "find" | "grep" => {
+                if args.is_empty() {
+                    self.status = "Usage: :search <pattern>".to_string();
+                } else {
+                    self.search_query = args.to_string();
+                    self.search_repeat(true);
+                }
+            }
+            "watch" => match self.resolve_data_target(args) {
+                Some(addr) => self.add_watchpoint(addr),
+                None => self.status = format!("ERROR: no such address or label \"{args}\""),
+            },
+            "unwatch" => match self.resolve_data_target(args) {
+                Some(addr) if self.remove_watchpoint(addr) => {
+                    self.status = format!("Removed watchpoint 0x{addr:016x}")
+                }
+                Some(addr) => self.status = format!("No watchpoint at 0x{addr:016x}"),
+                None => self.status = format!("ERROR: no such address or label \"{args}\""),
+            },
+            "cwatch" | "clearwatch" | "clearwatchpoints" => self.clear_watchpoints(),
+            "abi" => self.set_abi(args),
             "r" | "run" => self.action_run(),
             "stop" | "halt" => self.action_stop(),
             "reset" | "initpc" => self.reset_pc(),
@@ -171,24 +198,42 @@ impl<M: Machine> AppCommands for App<M> {
                 }
             }
             "b" | "break" | "breakpoint" => {
-                if args.is_empty() {
+                // `:b <target> if <expr>` sets a conditional breakpoint; a
+                // bare `:b` keeps its toggle behaviour.
+                let (target, condition) = match args.split_once(" if ") {
+                    Some((t, c)) => (t.trim().to_string(), Some(c.trim().to_string())),
+                    None => (args.to_string(), None),
+                };
+                if target.is_empty() && condition.is_none() {
                     if self.focus == Pane::Source {
                         let row = self.editor.row;
                         self.toggle_breakpoint_at_source_line(row);
                     } else {
                         self.toggle_breakpoint_at_pc();
                     }
-                } else if args.eq_ignore_ascii_case("pc") {
-                    self.toggle_breakpoint_at_pc();
-                } else if let Ok(line_num) = args.parse::<usize>() {
-                    let line_idx = line_num.saturating_sub(1);
-                    self.toggle_breakpoint_at_source_line(line_idx);
-                } else if let Some(addr) = self.machine.symbol_address(args) {
-                    self.toggle_breakpoint(addr);
-                } else if let Some(addr) = rvs_machine::parse_u64(args) {
-                    self.toggle_breakpoint(addr);
                 } else {
-                    self.status = format!("ERROR: Invalid address, line number, or label \"{args}\"");
+                    let resolved = if target.is_empty() {
+                        Some(self.machine.pc())
+                    } else {
+                        self.resolve_code_target(&target)
+                    };
+                    match resolved {
+                        Some(addr) => {
+                            if condition.is_some() {
+                                self.add_breakpoint(addr);
+                            } else {
+                                self.toggle_breakpoint(addr);
+                            }
+                            if let Some(expr) = condition {
+                                self.set_break_condition(addr, Some(expr));
+                            }
+                        }
+                        None => {
+                            self.status = format!(
+                                "ERROR: Invalid address, line number, or label \"{target}\""
+                            )
+                        }
+                    }
                 }
             }
             "cb" | "clearbreaks" => {
@@ -209,7 +254,11 @@ impl<M: Machine> AppCommands for App<M> {
                 }
                 self.status = format!(
                     "Calling convention checker: {}",
-                    if self.machine.convention_enabled() { "ON" } else { "OFF" }
+                    if self.machine.convention_enabled() {
+                        "ON"
+                    } else {
+                        "OFF"
+                    }
                 );
                 self.needs_full_clear = true;
             }
@@ -223,7 +272,10 @@ impl<M: Machine> AppCommands for App<M> {
                     "20" | "20hz" => self.run_speed = RunSpeed::Hz20,
                     "max" | "fast" => self.run_speed = RunSpeed::Max,
                     "" => self.run_speed = self.run_speed.next(),
-                    _ => self.status = format!("ERROR: Expected speed 1, 5, 20, or max; got \"{args}\""),
+                    _ => {
+                        self.status =
+                            format!("ERROR: Expected speed 1, 5, 20, or max; got \"{args}\"")
+                    }
                 }
                 self.status = format!("Run speed: {}", self.run_speed.label());
             }
@@ -245,7 +297,9 @@ impl<M: Machine> AppCommands for App<M> {
                     "gnu" => self.machine.set_dialect(Dialect::Gnu),
                     "rvs" | "dialect" => self.machine.set_dialect(Dialect::Rvs),
                     "" => self.machine.set_dialect(self.machine.dialect().toggle()),
-                    _ => self.status = format!("ERROR: Expected mode 'gnu' or 'rvs', got \"{args}\""),
+                    _ => {
+                        self.status = format!("ERROR: Expected mode 'gnu' or 'rvs', got \"{args}\"")
+                    }
                 }
                 self.status = format!("Assembly dialect: {}", self.machine.dialect().name());
                 self.needs_full_clear = true;
@@ -254,9 +308,12 @@ impl<M: Machine> AppCommands for App<M> {
                 let target = args.to_lowercase();
                 let src = self.editor.text();
                 let is_gnu_target = target == "gnu"
-                    || (target.is_empty()
-                        && self.machine.dialect() == Dialect::Rvs);
-                let target = if is_gnu_target { Dialect::Gnu } else { Dialect::Rvs };
+                    || (target.is_empty() && self.machine.dialect() == Dialect::Rvs);
+                let target = if is_gnu_target {
+                    Dialect::Gnu
+                } else {
+                    Dialect::Rvs
+                };
                 if let Some(transpiled) = self.machine.transpile(&src, target) {
                     self.editor.replace_text(&transpiled);
                 }
@@ -332,7 +389,9 @@ impl<M: Machine> AppCommands for App<M> {
                 self.editor.row = self.editor.lines.len().saturating_sub(1);
                 self.editor.clamp_cursor();
             }
-            Pane::Listing => self.scroll_listing = (self.machine.listing_len() + 4).saturating_sub(1),
+            Pane::Listing => {
+                self.scroll_listing = (self.machine.listing_len() + 4).saturating_sub(1)
+            }
             Pane::Regs => self.scroll_regs = 64,
             Pane::Mem => self.scroll_mem = self.machine.memory_len() + 2,
             Pane::Exec => self.scroll_exec = self.machine.exec_len().saturating_sub(1),
@@ -356,7 +415,9 @@ impl<M: Machine> AppCommands for App<M> {
         if delta < 0 {
             *off = off.saturating_sub((-delta) as usize);
         } else {
-            *off = off.saturating_add(delta as usize).min(len.saturating_sub(1));
+            *off = off
+                .saturating_add(delta as usize)
+                .min(len.saturating_sub(1));
         }
     }
     fn toggle_pane_option(&mut self, pane: Pane, slot: u8) {
@@ -385,14 +446,16 @@ impl<M: Machine> AppCommands for App<M> {
                 if self.dma_out_available {
                     self.view.dma_out = !self.view.dma_out;
                 } else {
-                    self.status = "DMA OUT requires OUTC (0x0) and OUTD (0x8) labels in source".to_string();
+                    self.status =
+                        "DMA OUT requires OUTC (0x0) and OUTD (0x8) labels in source".to_string();
                 }
             }
             (Pane::Inp, 1 | 5) => {
                 if self.dma_inp_available {
                     self.view.dma_inp = !self.view.dma_inp;
                 } else {
-                    self.status = "DMA INP requires INPC (0x10) and INPD (0x18) labels in source".to_string();
+                    self.status =
+                        "DMA INP requires INPC (0x10) and INPD (0x18) labels in source".to_string();
                 }
             }
             (Pane::Exec, 1) => {
@@ -425,7 +488,11 @@ impl<M: Machine> AppCommands for App<M> {
             (Pane::Source, 3) => {
                 let is_cur_rvs = self.machine.dialect() == Dialect::Rvs;
                 let src = self.editor.text();
-                let target = if is_cur_rvs { Dialect::Gnu } else { Dialect::Rvs };
+                let target = if is_cur_rvs {
+                    Dialect::Gnu
+                } else {
+                    Dialect::Rvs
+                };
                 if let Some(transpiled) = self.machine.transpile(&src, target) {
                     self.editor.replace_text(&transpiled);
                 }

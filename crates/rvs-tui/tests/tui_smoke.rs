@@ -2,10 +2,10 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use rvs_app::{App, ConfirmAction, FileAction, Modal, Mode, Pane};
-use rvs_machine::{Dialect, Machine};
-use rvs_machine_riscv::RiscV;
 use rvs_app_cmds::AppCommands as _;
 use rvs_app_keys::AppKeys as _;
+use rvs_machine::{Dialect, Machine};
+use rvs_machine_riscv::RiscV;
 use rvs_ui as ui;
 
 fn key(code: KeyCode) -> KeyEvent {
@@ -32,12 +32,15 @@ fn test_interactive_tui_lifecycle_and_rendering() {
     let mut terminal = Terminal::new(backend).unwrap();
 
     let mut app = App::<RiscV>::new(None);
-    app.editor.set_text("addi x1, x0, 5\naddi x2, x0, 10\nadd x3, x1, x2\nebreak x0, x0, 0\n");
+    app.editor
+        .set_text("addi x1, x0, 5\naddi x2, x0, 10\nadd x3, x1, x2\nebreak x0, x0, 0\n");
 
     // 1. Initial draw
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
     let frame = terminal.backend().to_string();
-    for token in ["[NORMAL]", "Source", "Listing", "Regs", "Mem", "Exec", "OUT", "INP"] {
+    for token in [
+        "[NORMAL]", "Source", "Listing", "Regs", "Mem", "Exec", "OUT", "INP",
+    ] {
         assert!(frame.contains(token));
     }
 
@@ -84,7 +87,8 @@ fn test_interactive_tui_lifecycle_and_rendering() {
 #[test]
 fn test_continuous_run_resumes_across_input() {
     let mut app = App::<RiscV>::new(None);
-    app.editor.set_text("addi x1, x0, 5\necall x2, x0, 5\nadd x3, x1, x2\nebreak x0, x0, 0\n");
+    app.editor
+        .set_text("addi x1, x0, 5\necall x2, x0, 5\nadd x3, x1, x2\nebreak x0, x0, 0\n");
     app.compile();
 
     // 1. Run ('r')
@@ -120,7 +124,8 @@ fn test_continuous_run_resumes_across_input() {
 #[test]
 fn test_run_vs_start_pc_semantics() {
     let mut app = App::<RiscV>::new(None);
-    app.editor.set_text("addi x1, x0, 5\naddi x2, x0, 10\nebreak x0, x0, 0\n");
+    app.editor
+        .set_text("addi x1, x0, 5\naddi x2, x0, 10\nebreak x0, x0, 0\n");
     app.compile();
 
     // Step first instruction: PC becomes 4, x1 becomes 5
@@ -174,7 +179,10 @@ fn test_unsaved_changes_modal_and_newline_exemption() {
     assert!(app2.editor.needs_save());
 
     app2.on_key(char_key('q'));
-    assert!(matches!(app2.modal, Modal::ConfirmSave(ConfirmAction::Quit)));
+    assert!(matches!(
+        app2.modal,
+        Modal::ConfirmSave(ConfirmAction::Quit)
+    ));
     assert_eq!(app2.modal_input, "file.s");
 
     // Esc cancels and retains edits
@@ -227,7 +235,10 @@ fn test_file_explorer_navigation_filter_and_load() {
     assert_eq!(app.explorer.selected, initial_selected);
 
     app.on_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT));
-    assert_eq!(app.explorer.selected, app.explorer.entries.len().saturating_sub(1));
+    assert_eq!(
+        app.explorer.selected,
+        app.explorer.entries.len().saturating_sub(1)
+    );
     app.on_key(char_key('g'));
     assert_eq!(app.explorer.selected, 0);
 
@@ -291,7 +302,8 @@ fn test_vim_editor_motions_operators_and_cursor_alignment() {
 
     let mut app = App::<RiscV>::new(None);
     // Line 0 starts with a tab character to verify tab visual expansion (8 cols)
-    app.editor.set_text("\taddi x1, x0, 5\naddi x2, x0, 10\nadd x3, x1, x2");
+    app.editor
+        .set_text("\taddi x1, x0, 5\naddi x2, x0, 10\nadd x3, x1, x2");
     assert_eq!(app.focus, Pane::Source);
     assert_eq!(app.mode, Mode::Normal);
 
@@ -479,7 +491,10 @@ fn test_load_and_recompile_clear_all_panes_and_scrolls() {
     app.action_start();
     app.action_next();
     assert_eq!(app.machine.sim().regs.read_x(1), 5);
-    app.machine.sim_mut().output.push_str("Program Output Line\n");
+    app.machine
+        .sim_mut()
+        .output
+        .push_str("Program Output Line\n");
     app.machine.sim_mut().mem.insert_dd(0x1000, "42", "42");
     app.scroll_listing = 5;
     app.scroll_exec = 5;
@@ -492,13 +507,41 @@ fn test_load_and_recompile_clear_all_panes_and_scrolls() {
     app.execute_command();
 
     // Verify all simulator state and scroll offsets are completely reset
-    assert!(app.machine.sim().listing.is_empty(), "Listing must be cleared on file load");
-    assert!(app.machine.sim().exec_log.is_empty(), "Exec log must be cleared on file load");
-    assert!(app.machine.sim().output.is_empty(), "Output must be cleared on file load");
-    assert!(app.machine.sim().mem.cells.is_empty(), "Memory must be cleared on file load");
-    assert_eq!(app.machine.sim().regs.read_x(1), 0, "Registers must be reset on file load");
-    assert_eq!([app.scroll_listing, app.scroll_exec, app.scroll_regs, app.scroll_mem, app.scroll_out], [0; 5]);
-    assert!(app.needs_full_clear, "needs_full_clear must be set on file load");
+    assert!(
+        app.machine.sim().listing.is_empty(),
+        "Listing must be cleared on file load"
+    );
+    assert!(
+        app.machine.sim().exec_log.is_empty(),
+        "Exec log must be cleared on file load"
+    );
+    assert!(
+        app.machine.sim().output.is_empty(),
+        "Output must be cleared on file load"
+    );
+    assert!(
+        app.machine.sim().mem.cells.is_empty(),
+        "Memory must be cleared on file load"
+    );
+    assert_eq!(
+        app.machine.sim().regs.read_x(1),
+        0,
+        "Registers must be reset on file load"
+    );
+    assert_eq!(
+        [
+            app.scroll_listing,
+            app.scroll_exec,
+            app.scroll_regs,
+            app.scroll_mem,
+            app.scroll_out
+        ],
+        [0; 5]
+    );
+    assert!(
+        app.needs_full_clear,
+        "needs_full_clear must be set on file load"
+    );
 
     terminal.clear().unwrap();
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
@@ -518,10 +561,28 @@ fn test_load_and_recompile_clear_all_panes_and_scrolls() {
 
     // Recompile: verify exec_log, output, and all 5 scrolls reset to 0, needs_full_clear set
     app.compile();
-    assert!(app.machine.sim().exec_log.is_empty(), "Exec log must be cleared on recompile");
-    assert!(app.machine.sim().output.is_empty(), "Output must be cleared on recompile");
-    assert_eq!([app.scroll_listing, app.scroll_exec, app.scroll_regs, app.scroll_mem, app.scroll_out], [0; 5]);
-    assert!(app.needs_full_clear, "needs_full_clear must be set on recompile");
+    assert!(
+        app.machine.sim().exec_log.is_empty(),
+        "Exec log must be cleared on recompile"
+    );
+    assert!(
+        app.machine.sim().output.is_empty(),
+        "Output must be cleared on recompile"
+    );
+    assert_eq!(
+        [
+            app.scroll_listing,
+            app.scroll_exec,
+            app.scroll_regs,
+            app.scroll_mem,
+            app.scroll_out
+        ],
+        [0; 5]
+    );
+    assert!(
+        app.needs_full_clear,
+        "needs_full_clear must be set on recompile"
+    );
 }
 
 #[test]
@@ -553,11 +614,15 @@ fn test_pill_toggles_and_dma_ux() {
     // 3. DMA unavailable indicators on Out and Inp
     app.focus = Pane::Out;
     app.on_key(char_key('d'));
-    assert!(app.status.contains("DMA OUT requires OUTC (0x0) and OUTD (0x8)"));
+    assert!(app
+        .status
+        .contains("DMA OUT requires OUTC (0x0) and OUTD (0x8)"));
 
     app.focus = Pane::Inp;
     app.on_key(char_key('d'));
-    assert!(app.status.contains("DMA INP requires INPC (0x10) and INPD (0x18)"));
+    assert!(app
+        .status
+        .contains("DMA INP requires INPC (0x10) and INPD (0x18)"));
 
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
     assert!(terminal.backend().to_string().contains("[DMA:N/A]"));
@@ -568,16 +633,23 @@ fn test_pill_toggles_and_dma_ux() {
     app.view.reg_int = true;
     app.view.reg_hex = true;
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
-    assert!(terminal.backend().to_string().contains("0x0000000000000000"));
+    assert!(terminal
+        .backend()
+        .to_string()
+        .contains("0x0000000000000000"));
 
     app.on_key(char_key('1'));
     assert!(!app.view.reg_hex);
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
-    assert!(!terminal.backend().to_string().contains("0x0000000000000000"));
+    assert!(!terminal
+        .backend()
+        .to_string()
+        .contains("0x0000000000000000"));
     app.zoomed_pane = None;
 
     // 5. DMA auto-enables on compile with OUTC and OUTD
-    app.editor.set_text("OUTC: DD 0\nOUTD: DD 0\nSTART: addi x1, x0, 5\n");
+    app.editor
+        .set_text("OUTC: DD 0\nOUTD: DD 0\nSTART: addi x1, x0, 5\n");
     app.compile();
     assert!(app.dma_out_available);
     assert!(app.view.dma_out);
@@ -606,13 +678,19 @@ fn test_listing_correlated_colorizing_and_toggle() {
 
     let y = (0..buffer.area.height)
         .find(|&y| {
-            let row: String = (0..buffer.area.width).map(|x| buffer[(x, y)].symbol()).collect();
+            let row: String = (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect();
             row.contains("0x0000000000000000") && row.contains("0010011")
         })
         .expect("Should find addi row in Listing buffer");
 
-    let fgs: Vec<ratatui::style::Color> = (0..buffer.area.width).map(|x| buffer[(x, y)].fg).collect();
-    assert!(fgs.contains(&rvs_theme::SAPPHIRE), "Opcode/funct should be SAPPHIRE");
+    let fgs: Vec<ratatui::style::Color> =
+        (0..buffer.area.width).map(|x| buffer[(x, y)].fg).collect();
+    assert!(
+        fgs.contains(&rvs_theme::SAPPHIRE),
+        "Opcode/funct should be SAPPHIRE"
+    );
     assert!(fgs.contains(&rvs_theme::TEAL), "rd should be TEAL");
     assert!(fgs.contains(&rvs_theme::MAUVE), "rs1 should be MAUVE");
     assert!(fgs.contains(&rvs_theme::PEACH), "imm should be PEACH");
@@ -654,14 +732,20 @@ fn test_tier1_debugging_features() {
     app.focus = Pane::Source;
     app.editor.row = 1;
     app.on_key(char_key('B'));
-    assert!(app.breakpoints.contains(&4), "Line 2 should map to address 0x4");
+    assert!(
+        app.breakpoints.contains(&4),
+        "Line 2 should map to address 0x4"
+    );
     assert!(app.has_breakpoint_on_line(1));
 
     // b) Run ':b' with no args while in Source on line 3 (row 2: add x3, x1, x2)
     app.editor.row = 2;
     app.command_input = ":b".to_string();
     app.execute_command();
-    assert!(app.breakpoints.contains(&8), "Line 3 should map to address 0x8");
+    assert!(
+        app.breakpoints.contains(&8),
+        "Line 3 should map to address 0x8"
+    );
     assert!(app.has_breakpoint_on_line(2));
 
     // c) Run ':b pc' to toggle breakpoint specifically at current PC (0x0)
@@ -676,7 +760,10 @@ fn test_tier1_debugging_features() {
     // Render check: both Source and Listing show breakpoint indicators
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
     let frame = terminal.backend().to_string();
-    assert!(frame.contains("●"), "Listing and Source must show breakpoint dot");
+    assert!(
+        frame.contains("●"),
+        "Listing and Source must show breakpoint dot"
+    );
 
     // Run: must stop at first breakpoint (0x4, line 2) before executing it
     app.action_start();
@@ -720,15 +807,22 @@ fn test_tier1_debugging_features() {
 
     // 4. Memory navigation & stack pointer jump
     app.machine.sim_mut().regs.write_x(2, 0x2000, false);
-    app.machine.sim_mut().mem.insert_dd(0x2000, "12345", "12345");
+    app.machine
+        .sim_mut()
+        .mem
+        .insert_dd(0x2000, "12345", "12345");
     app.focus = Pane::Mem;
     app.command_input = ":mem sp".to_string();
     app.execute_command();
-    assert!(app.status.contains("Jumped memory view to 0x0000000000002000"));
+    assert!(app
+        .status
+        .contains("Jumped memory view to 0x0000000000002000"));
 
     // Button [SP] in Mem toolbar (slot 5)
     app.toggle_pane_option(Pane::Mem, 5);
-    assert!(app.status.contains("Jumped memory view to 0x0000000000002000"));
+    assert!(app
+        .status
+        .contains("Jumped memory view to 0x0000000000002000"));
 }
 
 #[test]
@@ -750,15 +844,30 @@ fn test_tier2_execution_metrics_and_calling_convention() {
 
     // 1. Verify metrics counter accumulated accurately
     let m = &app.machine.metrics();
-    assert!(m.instructions >= 4, "Should execute at least 4 instructions");
-    assert!(m.cycles >= m.instructions, "Cycles should equal or exceed instruction count");
+    assert!(
+        m.instructions >= 4,
+        "Should execute at least 4 instructions"
+    );
+    assert!(
+        m.cycles >= m.instructions,
+        "Cycles should equal or exceed instruction count"
+    );
     assert_eq!(m.jumps, 2, "Should record 2 jumps (jal + jalr)");
 
     // 2. Verify calling convention checker caught both violations
     let cc = &app.machine.convention();
-    assert!(cc.violations.len() >= 2, "Must detect stack misalignment and saved register clobber");
-    assert!(cc.violations.iter().any(|v| v.contains("Stack pointer sp is not 16-byte aligned")));
-    assert!(cc.violations.iter().any(|v| v.contains("Saved register s0 was modified")));
+    assert!(
+        cc.violations.len() >= 2,
+        "Must detect stack misalignment and saved register clobber"
+    );
+    assert!(cc
+        .violations
+        .iter()
+        .any(|v| v.contains("Stack pointer sp is not 16-byte aligned")));
+    assert!(cc
+        .violations
+        .iter()
+        .any(|v| v.contains("Saved register s0 was modified")));
 
     // Execution log should contain WARN messages
     assert!(app.machine.sim().exec_log.contains("WARN [Convention]:"));
@@ -814,7 +923,11 @@ helper:
 "#;
     app.editor.set_text(gnu_source);
     app.compile();
-    assert!(!app.machine.sim().listing.contains("ERROR:"), "Listing had error: {}", app.machine.sim().listing);
+    assert!(
+        !app.machine.sim().listing.contains("ERROR:"),
+        "Listing had error: {}",
+        app.machine.sim().listing
+    );
 
     app.action_start();
     while app.running {
@@ -844,10 +957,18 @@ helper:
     let line_count_before = app.editor.lines.len();
     app.command_input = ":tp rvs".to_string();
     app.execute_command();
-    assert_eq!(app.editor.lines.len(), line_count_before, "Transpiler must not add extra newlines");
+    assert_eq!(
+        app.editor.lines.len(),
+        line_count_before,
+        "Transpiler must not add extra newlines"
+    );
     app.command_input = ":tp gnu".to_string();
     app.execute_command();
-    assert_eq!(app.editor.lines.len(), line_count_before, "Transpiler must not add extra newlines");
+    assert_eq!(
+        app.editor.lines.len(),
+        line_count_before,
+        "Transpiler must not add extra newlines"
+    );
 
     // 4. Test Source toolbar buttons: [RVS] (slot 1), [GNU] (slot 2), [TRANSPILE] (slot 3)
     let backend = TestBackend::new(140, 40);
@@ -919,12 +1040,26 @@ inner:  ebreak x0, x0, 0        # pause execution inside inner function
 
     // 1. Verify CallFrame stack inspection
     let frames = app.machine.stack().frames;
-    assert_eq!(frames.len(), 2, "Should have 2 active call frames (outer and inner)");
+    assert_eq!(
+        frames.len(),
+        2,
+        "Should have 2 active call frames (outer and inner)"
+    );
 
     let outer_frame = &frames[0];
     assert_eq!(outer_frame.function_name, "outer");
-    assert_eq!(outer_frame.slots.len(), 2, "16-byte frame has 2 double-word slots");
-    assert!(outer_frame.slots.iter().any(|s| s.annotation.contains("Saved ra")), "Must identify saved ra slot");
+    assert_eq!(
+        outer_frame.slots.len(),
+        2,
+        "16-byte frame has 2 double-word slots"
+    );
+    assert!(
+        outer_frame
+            .slots
+            .iter()
+            .any(|s| s.annotation.contains("Saved ra")),
+        "Must identify saved ra slot"
+    );
 
     let inner_frame = &frames[1];
     assert_eq!(inner_frame.function_name, "inner");
@@ -957,4 +1092,155 @@ fn test_initial_frame_snapshot() {
         .set_text("addi x1, x0, 5\nadd x2, x1, x1\nebreak x0, x0, 0\n");
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
     insta::assert_snapshot!("initial_frame", terminal.backend().to_string());
+}
+
+#[test]
+fn test_search_and_counts() {
+    let mut app = App::<RiscV>::new(None);
+    app.editor
+        .set_text("addi x1, x0, 5\naddi x2, x0, 6\naddi x1, x0, 7\naddi x1, x0, 8\n");
+
+    // Counts: `3j` moves three rows, plain `j` moves one.
+    app.on_key(char_key('3'));
+    app.on_key(char_key('j'));
+    assert_eq!(app.editor.row, 3);
+    app.on_key(char_key('g'));
+    app.on_key(char_key('g'));
+    assert_eq!(app.editor.row, 0);
+
+    // `/x1` + Enter finds the first occurrence (row 0, col 5).
+    app.on_key(char_key('/'));
+    assert_eq!(app.mode, Mode::Search);
+    type_str(&mut app, "x1");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(app.mode, Mode::Normal);
+    assert_eq!((app.editor.row, app.editor.col), (0, 5));
+
+    // Ctrl+N / Ctrl+P repeat the search.
+    app.on_key(ctrl('n'));
+    assert_eq!(app.editor.row, 2);
+    app.on_key(ctrl('n'));
+    assert_eq!(app.editor.row, 3);
+    app.on_key(ctrl('p'));
+    assert_eq!(app.editor.row, 2);
+
+    // Esc cancels; an unknown pattern reports rather than moving.
+    app.on_key(char_key('/'));
+    app.on_key(key(KeyCode::Esc));
+    assert_eq!(app.mode, Mode::Normal);
+    app.on_key(char_key('/'));
+    type_str(&mut app, "nope");
+    app.on_key(key(KeyCode::Enter));
+    assert!(app.status.contains("Pattern not found"), "{}", app.status);
+
+    // `:search` is the command-line equivalent.
+    app.on_key(char_key(':'));
+    type_str(&mut app, "search x2");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(app.editor.row, 1);
+}
+
+#[test]
+fn test_step_over_and_finish() {
+    let mut app = App::<RiscV>::new(None);
+    app.editor.set_text(
+        "\
+        addi x1, x0, 1
+        jal  x5, sub
+        addi x2, x0, 2
+        ebreak x0, x0, 0
+sub:    addi x3, x0, 3
+        jalr x0, x5, 0
+",
+    );
+    app.on_key(char_key('c'));
+    assert!(app.machine.sim().listing.contains("jal"));
+    app.on_key(char_key('s')); // START
+    assert_eq!(app.machine.pc(), 0);
+
+    // Not a call: `:next` behaves like a single step.
+    app.step_over();
+    assert_eq!(app.machine.pc(), 4);
+
+    // At the call: `:next` runs the callee and stops after it returns.
+    app.step_over();
+    assert_eq!(app.machine.pc(), 8, "step over should land after the call");
+    assert_eq!(app.machine.sim().regs.read_x(3), 3, "callee must have run");
+
+    // `:finish` from inside the callee returns to the caller.
+    app.on_key(char_key('s')); // restart at START
+    assert_eq!(app.machine.pc(), 0);
+    app.action_next(); // past addi
+    app.action_next(); // into the callee
+    assert_eq!(app.machine.pc(), 16, "sub starts at 16");
+    app.on_key(char_key(':'));
+    type_str(&mut app, "finish");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(app.machine.pc(), 8, "finish should return to the caller");
+}
+
+#[test]
+fn test_watchpoint_stops_the_run() {
+    let mut app = App::<RiscV>::new(None);
+    app.editor.set_text(
+        "\
+        addi x2, x0, 0x100
+        addi x1, x0, 1
+        sd   x1, 0(x2)
+        sd   x1, 8(x2)
+        ebreak x0, x0, 0
+",
+    );
+    app.on_key(char_key('c'));
+    app.on_key(char_key(':'));
+    type_str(&mut app, "watch 0x100");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(app.watchpoints.len(), 1);
+
+    app.on_key(char_key('s'));
+    app.run_chunk(std::time::Duration::from_millis(50));
+    assert!(
+        app.status.contains("Watchpoint 0x0000000000000100"),
+        "status was {:?}",
+        app.status
+    );
+    // Stopped right after the first store (pc = the second `sd`).
+    assert_eq!(app.machine.pc(), 12);
+    assert!(!app.running);
+
+    app.on_key(char_key(':'));
+    type_str(&mut app, "cwatch");
+    app.on_key(key(KeyCode::Enter));
+    assert!(app.watchpoints.is_empty());
+}
+
+#[test]
+fn test_conditional_breakpoint() {
+    let mut app = App::<RiscV>::new(None);
+    app.editor.set_text(
+        "\
+        addi x1, x0, 0
+        addi x6, x0, 5
+loop:   addi x1, x1, 1
+        blt  x1, x6, loop
+        ebreak x0, x0, 0
+",
+    );
+    app.on_key(char_key('c'));
+    app.on_key(char_key(':'));
+    type_str(&mut app, "b loop if x1 == 3");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(app.breakpoints.len(), 1);
+    assert_eq!(app.break_conditions.len(), 1);
+
+    app.on_key(char_key('s'));
+    app.run_chunk(std::time::Duration::from_millis(50));
+    assert_eq!(app.machine.pc(), 8, "should stop at loop");
+    assert_eq!(app.machine.sim().regs.read_x(1), 3);
+
+    // Clearing breakpoints also drops their conditions.
+    app.on_key(char_key(':'));
+    type_str(&mut app, "cb");
+    app.on_key(key(KeyCode::Enter));
+    assert!(app.break_conditions.is_empty());
 }

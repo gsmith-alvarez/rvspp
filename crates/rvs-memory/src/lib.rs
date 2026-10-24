@@ -9,7 +9,7 @@
 //! agree on that layout. Hex-digit case is preserved per byte because Tcl
 //! splices register strings (which may be uppercase) into cells.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use rvs_tcl as tcl;
 
@@ -22,6 +22,9 @@ pub struct InstructionCell {
     /// Operands exactly as written, kept so `dump` stays idempotent.
     pub raw_args: Vec<String>,
     pub source_line: String,
+    /// Encoder diagnostic for this cell, set by `dump`. A cell with an error
+    /// is never executed: the run halts and the message goes to the trace.
+    pub encode_error: Option<String>,
 }
 
 /// One memory cell.
@@ -60,11 +63,9 @@ impl MemoryCell {
                 };
                 tcl::tcl_list_str(&["DD".to_string(), hex, source_line.clone()])
             }
-            MemoryCell::Instruction(c) => tcl::tcl_list_str(&[
-                c.op.clone(),
-                c.args.join(" "),
-                c.source_line.clone(),
-            ]),
+            MemoryCell::Instruction(c) => {
+                tcl::tcl_list_str(&[c.op.clone(), c.args.join(" "), c.source_line.clone()])
+            }
         }
     }
 }
@@ -121,9 +122,15 @@ pub fn tcl_string_range(s: &str, first: i64, last: i64) -> String {
 }
 
 /// Sparse memory addressed by 64-bit cell addresses.
+///
+/// When the undo journal is enabled (`start_journal`), every mutation records
+/// the cell's previous contents. `RiscV::snapshot` then only has to remember a
+/// mark, which is what makes reverse stepping O(registers) instead of O(memory).
 #[derive(Clone, Debug, Default)]
 pub struct Memory {
     pub cells: BTreeMap<u64, MemoryCell>,
+    journal: Option<VecDeque<(u64, Option<MemoryCell>)>>,
+    journal_dropped: u64,
 }
 
 impl Memory {
@@ -133,6 +140,66 @@ impl Memory {
 
     pub fn clear(&mut self) {
         self.cells.clear();
+        self.reset_journal();
+    }
+
+    // ----- undo journal -------------------------------------------------
+
+    /// Begin recording previous cell contents (called after assembly).
+    pub fn start_journal(&mut self) {
+        self.journal = Some(VecDeque::new());
+        self.journal_dropped = 0;
+    }
+
+    /// Discard the journal (fresh compile, batch mode).
+    pub fn reset_journal(&mut self) {
+        self.journal = None;
+        self.journal_dropped = 0;
+    }
+
+    /// Absolute position in the journal, for snapshotting.
+    pub fn journal_mark(&self) -> u64 {
+        self.journal_dropped + self.journal.as_ref().map_or(0, |j| j.len() as u64)
+    }
+
+    fn record(&mut self, a8: u64) {
+        if let Some(journal) = &mut self.journal {
+            let previous = self.cells.get(&a8).cloned();
+            journal.push_back((a8, previous));
+        }
+    }
+
+    /// Undo every journal entry after `mark`, newest first.
+    pub fn journal_rewind_to(&mut self, mark: u64) {
+        let Some(journal) = &mut self.journal else {
+            return;
+        };
+        while self.journal_dropped + journal.len() as u64 > mark {
+            let Some((addr, previous)) = journal.pop_back() else {
+                break;
+            };
+            match previous {
+                Some(cell) => {
+                    self.cells.insert(addr, cell);
+                }
+                None => {
+                    self.cells.remove(&addr);
+                }
+            }
+        }
+    }
+
+    /// Forget entries older than `mark` (a history snapshot was dropped).
+    pub fn journal_drop_before(&mut self, mark: u64) {
+        let Some(journal) = &mut self.journal else {
+            return;
+        };
+        while self.journal_dropped < mark {
+            if journal.pop_front().is_none() {
+                break;
+            }
+            self.journal_dropped += 1;
+        }
     }
 
     /// `chkadr`: conflict test used by the assembler.
@@ -145,7 +212,10 @@ impl Memory {
             self.cells.contains_key(&(addr / 8 * 8)) || self.cells.contains_key(&(addr / 8 * 8 + 4))
         } else {
             self.cells.contains_key(&(addr / 4 * 4))
-                || matches!(self.cells.get(&(addr / 8 * 8)), Some(MemoryCell::Data { .. }))
+                || matches!(
+                    self.cells.get(&(addr / 8 * 8)),
+                    Some(MemoryCell::Data { .. })
+                )
         }
     }
 
@@ -201,7 +271,11 @@ impl Memory {
                 ))
             }
         };
-        let mask = if len == 8 { u64::MAX } else { (1u64 << (len * 8)) - 1 };
+        let mask = if len == 8 {
+            u64::MAX
+        } else {
+            (1u64 << (len * 8)) - 1
+        };
         Ok((value >> (8 * r8)) & mask)
     }
 
@@ -226,25 +300,22 @@ impl Memory {
         if self.cells.contains_key(&(a8 + 4)) {
             return Err(self.code_error("memw", addr, a8, len));
         }
-        if !self.cells.contains_key(&a8) {
-            self.cells.insert(
-                a8,
-                MemoryCell::Data {
-                    value: 0,
-                    case: 0,
-                    expr: None,
-                    source_line: String::new(),
-                },
-            );
-        }
-        let mask = if len == 8 { u64::MAX } else { (1u64 << (len * 8)) - 1 };
+        self.record(a8);
+        self.cells.entry(a8).or_insert_with(|| MemoryCell::Data {
+            value: 0,
+            case: 0,
+            expr: None,
+            source_line: String::new(),
+        });
+        let mask = if len == 8 {
+            u64::MAX
+        } else {
+            (1u64 << (len * 8)) - 1
+        };
         let clear = !(mask << (8 * r8));
         match self.cells.get_mut(&a8) {
             Some(MemoryCell::Data {
-                value,
-                case,
-                expr,
-                ..
+                value, case, expr, ..
             }) => {
                 if let Some(e) = expr {
                     // Tcl splices into the raw operand text; cells carrying an
@@ -293,7 +364,7 @@ impl Memory {
 
     /// `getstr1`: NUL-terminated string starting at a doubleword boundary.
     pub fn get_c_string(&self, start: u64) -> SimResult<String> {
-        if start % 8 != 0 {
+        if !start.is_multiple_of(8) {
             return sim_err("ERROR: source string must start at double-word boundary");
         }
         let mut a = start;
@@ -314,7 +385,7 @@ impl Memory {
     /// Returns the `"addr:hex"` summary; the overwrite error is returned as
     /// data (Tcl callers print it).
     pub fn put_c_string(&mut self, start: u64, s: &str) -> SimResult<String> {
-        if start % 8 != 0 {
+        if !start.is_multiple_of(8) {
             return sim_err("ERROR: destination string must start at double-word boundary");
         }
         let chars: Vec<String> = s.chars().map(|c| c.to_string()).collect();
@@ -333,6 +404,7 @@ impl Memory {
                 ));
             }
             let value = tcl::parse_int(dw).unwrap_or(0) as u64;
+            self.record(a);
             self.cells.insert(
                 a,
                 MemoryCell::Data {
@@ -344,7 +416,11 @@ impl Memory {
             );
             a += 8;
         }
-        Ok(format!("{}:{hex2}", Self::addr_str(start), hex2 = hex.join(",")))
+        Ok(format!(
+            "{}:{hex2}",
+            Self::addr_str(start),
+            hex2 = hex.join(",")
+        ))
     }
 
     /// Whether the cell at `addr` exists and is a `DD` data cell.
@@ -356,10 +432,7 @@ impl Memory {
     pub fn dd_hex(&self, addr: u64) -> Option<String> {
         match self.cells.get(&addr) {
             Some(MemoryCell::Data {
-                value,
-                case,
-                expr,
-                ..
+                value, case, expr, ..
             }) => Some(match expr {
                 Some(e) => e.clone(),
                 None => render_value(*value, *case),
@@ -370,6 +443,7 @@ impl Memory {
 
     /// Overwrite a data cell's value/case, keeping its source line.
     pub fn set_dd_value(&mut self, addr: u64, value: u64, case: u64) {
+        self.record(addr);
         if let Some(MemoryCell::Data {
             value: v,
             case: c,
@@ -393,6 +467,7 @@ impl Memory {
 
     /// Insert a data cell like the assembler's `DD` branch does.
     pub fn insert_dd(&mut self, addr: u64, expr: &str, source_line: &str) {
+        self.record(addr);
         self.cells.insert(
             addr,
             MemoryCell::Data {
@@ -412,6 +487,7 @@ impl Memory {
         args: Vec<String>,
         source_line: &str,
     ) {
+        self.record(addr);
         self.cells.insert(
             addr,
             MemoryCell::Instruction(InstructionCell {
@@ -419,6 +495,7 @@ impl Memory {
                 raw_args: args.clone(),
                 args,
                 source_line: source_line.to_string(),
+                encode_error: None,
             }),
         );
     }
@@ -462,7 +539,7 @@ pub fn args2hex(args: &[String], fmt: ArgsFmt) -> Result<Vec<String>, Args2HexEr
         };
         hex = format!("{s}{hex}");
     }
-    if hex.chars().count() % 16 != 0 {
+    if !hex.chars().count().is_multiple_of(16) {
         hex = format!("0000000000000000{hex}");
     }
     let chars: Vec<char> = hex.chars().collect();
@@ -474,7 +551,12 @@ pub fn args2hex(args: &[String], fmt: ArgsFmt) -> Result<Vec<String>, Args2HexEr
     let mut out = format!("0x{}", chars[n - 16..].iter().collect::<String>());
     let mut i = n as i64 - 32;
     while i >= 0 {
-        out.push_str(&format!(",0x{}", chars[i as usize..(i + 16) as usize].iter().collect::<String>()));
+        out.push_str(&format!(
+            ",0x{}",
+            chars[i as usize..(i + 16) as usize]
+                .iter()
+                .collect::<String>()
+        ));
         i -= 16;
     }
     Ok(out.split(',').map(|s| s.to_string()).collect())
@@ -536,7 +618,12 @@ mod tests {
     #[test]
     fn code_conflicts() {
         let mut m = Memory::new();
-        m.insert_instruction(4, "add", vec!["x1".into(), "x2".into(), "x3".into()], "add x1,x2,x3");
+        m.insert_instruction(
+            4,
+            "add",
+            vec!["x1".into(), "x2".into(), "x3".into()],
+            "add x1,x2,x3",
+        );
         // mem(a8) is empty, so Tcl's message construction itself fails
         let err = m.read_bytes(0, 8).unwrap_err().0;
         assert_eq!(
@@ -554,7 +641,9 @@ mod tests {
             },
         );
         let err = m.read_bytes(0, 8).unwrap_err().0;
-        assert!(err.starts_with("memr: #code adr=0x0000000000000000 len=8 mem(0x0000000000000000)=DD "));
+        assert!(
+            err.starts_with("memr: #code adr=0x0000000000000000 len=8 mem(0x0000000000000000)=DD ")
+        );
         let mut m2 = Memory::new();
         m2.cells.insert(
             8,
@@ -567,20 +656,14 @@ mod tests {
         );
         assert_eq!(m2.read_bytes(8, 8).unwrap(), 1);
         m2.write_bytes(12, 1, 0xff, false).unwrap();
-        assert_eq!(
-            m2.dd_hex(8).unwrap(),
-            "0x000000ff00000001"
-        );
+        assert_eq!(m2.dd_hex(8).unwrap(), "0x000000ff00000001");
     }
 
     #[test]
     fn strings_roundtrip() {
         let mut m = Memory::new();
         let res = m.put_c_string(0, "abc\0").unwrap();
-        assert_eq!(
-            res,
-            "0x0000000000000000:0x0000000000636261"
-        );
+        assert_eq!(res, "0x0000000000000000:0x0000000000636261");
         assert_eq!(m.dd_hex(0).unwrap(), "0x0000000000636261");
         assert_eq!(m.get_c_string(0).unwrap(), "abc");
         assert!(m
@@ -612,6 +695,49 @@ mod tests {
                 "0x0000000000006a69".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn journal_rewinds_memory_exactly() {
+        let mut m = Memory::new();
+        m.start_journal();
+        let mark_empty = m.journal_mark();
+        m.insert_dd(0x100, "1", "DD 1");
+        let mark_one = m.journal_mark();
+        m.set_dd_value(0x100, 7, 0);
+        let mark_two = m.journal_mark();
+        m.set_dd_value(0x100, 9, 0);
+        assert_eq!(m.journal_mark(), mark_two + 1);
+
+        m.journal_rewind_to(mark_two);
+        assert_eq!(m.dd_hex(0x100).as_deref(), Some("0x0000000000000007"));
+        m.journal_rewind_to(mark_one);
+        assert!(m.cells.contains_key(&0x100));
+        m.journal_rewind_to(mark_empty);
+        assert!(!m.cells.contains_key(&0x100), "insert must be undone");
+    }
+
+    #[test]
+    fn journal_drop_before_releases_old_entries() {
+        let mut m = Memory::new();
+        m.start_journal();
+        m.insert_dd(0x100, "1", "");
+        m.set_dd_value(0x100, 2, 0);
+        let mark = m.journal_mark();
+        m.set_dd_value(0x100, 3, 0);
+        m.journal_drop_before(mark);
+        // The pinned prefix is gone, but everything after the mark still rewinds.
+        m.journal_rewind_to(mark);
+        assert_eq!(m.dd_hex(0x100).as_deref(), Some("0x0000000000000002"));
+    }
+
+    #[test]
+    fn journal_is_inert_until_started() {
+        let mut m = Memory::new();
+        m.insert_dd(0x100, "1", "");
+        assert_eq!(m.journal_mark(), 0);
+        m.journal_rewind_to(0);
+        assert!(m.cells.contains_key(&0x100));
     }
 
     #[test]

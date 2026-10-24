@@ -4,7 +4,7 @@ The RVS++ project contains original software written in Rust as well as referenc
 
 ---
 
-## 1. RVS++ Rust Workspace (crates/rvs-core, crates/rvs-tui, and Tooling)
+## 1. RVS++ Rust Workspace (`crates/*`, tooling, docs, tests)
 
 The modern Rust implementation of RVS++ is licensed under the **MIT License**:
 
@@ -38,7 +38,7 @@ SOFTWARE.
 
 RVS++ was inspired by and built to preserve computational and autograding parity with **RVS (RISC-V Visual Simulator) v0.46**, originally authored in 2019 by **SIDIC**. 
 
-The inclusion of `src/RVS046.tcl` in this repository serves as the definitive reference implementation and differential testing baseline for RISC-V computer organization coursework. 
+The inclusion of `src/RVS046.tcl` in this repository serves as the definitive reference implementation and differential testing baseline for RISC-V computer organization coursework. The SIDIC terms below cover **only that file** (`src/RVS046.tcl`); the Rust workspace in `crates/*` is MIT-licensed under section 1. Keep the reference file out of distributions that need to be MIT-only, and treat any reuse of its code (as opposed to its observable behaviour) as governed by SIDIC's not-for-profit terms.
 
 In accordance with the permissions granted in `src/RVS046.tcl` (lines 321–325), the original copyright notice and license terms are reproduced below:
 

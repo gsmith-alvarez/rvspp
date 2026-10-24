@@ -2,10 +2,12 @@
 
 use std::collections::BTreeMap;
 
-use rvs_asm_syntax::{find_instr, fmti, normalize_args, render_line_f1, slbl, split_line, InstrFmt};
+use rvs_asm_syntax::{
+    find_instr, fmti, normalize_args, render_line_f1, slbl, split_line, InstrFmt,
+};
 use rvs_memory as memory;
-use rvs_memory::MemoryCell;
 use rvs_memory::tcl_string_range;
+use rvs_memory::MemoryCell;
 use rvs_regs::parse_reg;
 use rvs_sim::{AsmError, Simulator};
 use rvs_tcl as tcl;
@@ -17,6 +19,9 @@ pub struct Encoded {
     pub asmx: Vec<String>,
     pub asm: String,
     pub error: Option<String>,
+    /// The mnemonic is not in `INSTR_TABLE`. The reference keeps the cell and
+    /// fails at `eval` time, so the executor must still see it.
+    pub unknown_op: bool,
 }
 
 fn reg_or_err(arg: &str, role: &str, fp_only: bool, reject_fp: bool) -> Result<u8, String> {
@@ -49,10 +54,22 @@ pub fn encode(op: &str, args: &[String], pc: u64, sym: &BTreeMap<String, String>
                 },
                 asm: format!("{op} {}", args.join(" ")),
                 error: Some("ERROR: INSTR CODE NOT RECOGNIZED".to_string()),
+                unknown_op: true,
             }
         }
     };
     let mut e = Encoded::default();
+    // Arg-count guard: never index `args` before the per-format checks below.
+    let need = match desc.fmt {
+        InstrFmt::U | InstrFmt::Uj | InstrFmt::F2 => 2,
+        _ => 3,
+    };
+    if args.len() != need {
+        e.asm = format!("{op} {}", args.join(","));
+        e.asmx = vec![op.to_string()];
+        e.error = Some(format!("ERROR: MUST HAVE {need} ARGS"));
+        return e;
+    }
     e.asm = match desc.fmt {
         InstrFmt::I | InstrFmt::Fi => {
             if desc.op == "ld" || desc.op == "fld" {
@@ -88,9 +105,9 @@ pub fn encode(op: &str, args: &[String], pc: u64, sym: &BTreeMap<String, String>
         }
     };
     let imm12_ok = |imm: i64| -> Result<(), String> {
-        if imm < -(1i64 << 11) || imm > (1i64 << 12) - 1 {
+        if !(-(1i64 << 11)..=(1i64 << 12) - 1).contains(&imm) {
             Err(format!(
-                "ERROR: imm OUT OF RANGE [{}{}]",
+                "ERROR: imm OUT OF RANGE [{},{}]",
                 -(1i64 << 11),
                 (1i64 << 12) - 1
             ))
@@ -105,7 +122,9 @@ pub fn encode(op: &str, args: &[String], pc: u64, sym: &BTreeMap<String, String>
                 e.error = Some("ERROR: MUST HAVE 3 ARGS".to_string());
             } else if let Err(msg) = reg_or_err(&args[0], "rd", false, true)
                 .and_then(|rd| reg_or_err(&args[1], "rs1", false, true).map(|r1| (rd, r1)))
-                .and_then(|(rd, r1)| reg_or_err(&args[2], "rs2", false, true).map(|r2| (rd, r1, r2)))
+                .and_then(|(rd, r1)| {
+                    reg_or_err(&args[2], "rs2", false, true).map(|r2| (rd, r1, r2))
+                })
             {
                 e.error = Some(msg);
             } else {
@@ -145,8 +164,16 @@ pub fn encode(op: &str, args: &[String], pc: u64, sym: &BTreeMap<String, String>
                         if let Err(m) = imm12_ok(imm) {
                             e.error = Some(m);
                         } else {
-                            let rdxp = if args[0].to_ascii_lowercase().starts_with('f') { "f" } else { "x" };
-                            let rs1xp = if args[1].to_ascii_lowercase().starts_with('f') { "f" } else { "x" };
+                            let rdxp = if args[0].to_ascii_lowercase().starts_with('f') {
+                                "f"
+                            } else {
+                                "x"
+                            };
+                            let rs1xp = if args[1].to_ascii_lowercase().starts_with('f') {
+                                "f"
+                            } else {
+                                "x"
+                            };
                             e.asmx = vec![
                                 op.to_string(),
                                 format!("{rdxp}{rd}"),
@@ -258,8 +285,8 @@ pub fn encode(op: &str, args: &[String], pc: u64, sym: &BTreeMap<String, String>
                         } else if target % 4 != 0 {
                             e.error = Some("ERROR: imm NOT WORD-ALIGNED".to_string());
                         } else {
-                            let offset = target as i64 - pc as i64;
-                            if offset < -(1i64 << 12) || offset > (1i64 << 12) - 1 {
+                            let offset = target - pc as i64;
+                            if !(-(1i64 << 12)..=(1i64 << 12) - 1).contains(&offset) {
                                 e.error = Some(format!(
                                     "ERROR: imm OUT OF RANGE [PC{},PC+{}]",
                                     -(1i64 << 12),
@@ -313,7 +340,7 @@ pub fn encode(op: &str, args: &[String], pc: u64, sym: &BTreeMap<String, String>
                                 e.error = Some("ERROR: imm NOT WORD-ALIGNED".to_string());
                                 return finish(e);
                             }
-                            let offset = target as i64 - pc as i64;
+                            let offset = target - pc as i64;
                             if offset < -(1i64 << pw) || offset > (1i64 << pw) - 1 {
                                 e.error = Some(format!(
                                     "ERROR: imm OUT OF RANGE [PC{},PC+{}]",
@@ -333,11 +360,7 @@ pub fn encode(op: &str, args: &[String], pc: u64, sym: &BTreeMap<String, String>
                         } else {
                             target
                         };
-                        e.asmx = vec![
-                            op.to_string(),
-                            format!("x{rd}"),
-                            tcl::i20x_hex(raw_imm),
-                        ];
+                        e.asmx = vec![op.to_string(), format!("x{rd}"), tcl::i20x_hex(raw_imm)];
                         let digits = if is_uj { 21 } else { 20 };
                         let immb = tcl::fmt_bits(raw_imm, digits);
                         e.bin = if is_uj {
@@ -373,14 +396,13 @@ pub fn encode(op: &str, args: &[String], pc: u64, sym: &BTreeMap<String, String>
                     reg_or_err(&args[0], "rd", false, true)
                         .and_then(|rd| reg_or_err(&args[1], "fs1", true, false).map(|r| (rd, r)))
                 } else {
-                    reg_or_err(&args[0], "fd", true, false)
-                        .and_then(|rd| {
-                            if desc.op == "fsqrt.d" {
-                                reg_or_err(&args[1], "rs1", true, false).map(|r| (rd, r))
-                            } else {
-                                reg_or_err(&args[1], "rs1", false, true).map(|r| (rd, r))
-                            }
-                        })
+                    reg_or_err(&args[0], "fd", true, false).and_then(|rd| {
+                        if desc.op == "fsqrt.d" {
+                            reg_or_err(&args[1], "rs1", true, false).map(|r| (rd, r))
+                        } else {
+                            reg_or_err(&args[1], "rs1", false, true).map(|r| (rd, r))
+                        }
+                    })
                 };
                 match result {
                     Err(m) => e.error = Some(m),
@@ -461,7 +483,10 @@ pub fn assemble(sim: &mut Simulator, body: &str) -> Result<String, AsmError> {
     let mut res = String::from("\n");
     macro_rules! fail {
         ($msg:expr) => {{
-            return Err(AsmError { progress: res, message: $msg.to_string() });
+            return Err(AsmError {
+                progress: res,
+                message: $msg.to_string(),
+            });
         }};
     }
     let transpiled_storage;
@@ -483,9 +508,7 @@ pub fn assemble(sim: &mut Simulator, body: &str) -> Result<String, AsmError> {
                 fail!("redefined label");
             }
         }
-        if !label.is_empty()
-            && (!tcl::is_alpha_first(&label) || !tcl::is_wordchars(&label))
-        {
+        if !label.is_empty() && (!tcl::is_alpha_first(&label) || !tcl::is_wordchars(&label)) {
             fail!("Label name must be alphanumeric starting with a letter");
         }
         if parsed.op.is_empty() {
@@ -504,10 +527,7 @@ pub fn assemble(sim: &mut Simulator, body: &str) -> Result<String, AsmError> {
                 fail!("DC operand must be enclosed in double quotes");
             }
             let inner = &args[1..args.len() - 1];
-            let chars: Vec<String> = tcl_subst(inner)
-                .chars()
-                .map(|c| c.to_string())
-                .collect();
+            let chars: Vec<String> = tcl_subst(inner).chars().map(|c| c.to_string()).collect();
             args = match memory::args2hex(&chars, memory::ArgsFmt::A1) {
                 Ok(a) => a.join(","),
                 Err(e) => fail!(e.0),
@@ -552,7 +572,7 @@ pub fn assemble(sim: &mut Simulator, body: &str) -> Result<String, AsmError> {
                 if arg.is_empty() {
                     fail!("Missing operand");
                 }
-                if sim.regs.pc % 8 != 0 {
+                if !sim.regs.pc.is_multiple_of(8) {
                     sim.regs.pc = sim.regs.pc / 8 * 8 + 8;
                     if !label.is_empty() {
                         sim.sym.insert(label.clone(), tcl::a64(sim.regs.pc));
@@ -561,7 +581,11 @@ pub fn assemble(sim: &mut Simulator, body: &str) -> Result<String, AsmError> {
                 if sim.mem.check_addr_conflict(sim.regs.pc, true) {
                     fail!("Overwrite attempt");
                 }
-                let source = if first { lineorg.clone() } else { String::new() };
+                let source = if first {
+                    lineorg.clone()
+                } else {
+                    String::new()
+                };
                 sim.line_to_addr.insert(line_idx, sim.regs.pc);
                 sim.addr_to_line.insert(sim.regs.pc, line_idx);
                 sim.mem.insert_dd(sim.regs.pc, &arg, &source);
@@ -571,9 +595,9 @@ pub fn assemble(sim: &mut Simulator, body: &str) -> Result<String, AsmError> {
             continue;
         }
         if op.eq_ignore_ascii_case("ORG") {
-            let value = match slbl(&args, &sim.sym).filter(|v| {
-                *v >= i64::MIN as i128 && *v <= i64::MAX as i128
-            }) {
+            let value = match slbl(&args, &sim.sym)
+                .filter(|v| *v >= i64::MIN as i128 && *v <= i64::MAX as i128)
+            {
                 Some(v) => v,
                 None => fail!("Wrong ORG value/expr (no forward labels allowed)"),
             };
@@ -587,16 +611,16 @@ pub fn assemble(sim: &mut Simulator, body: &str) -> Result<String, AsmError> {
             if label.is_empty() {
                 fail!("EQU must have a label");
             }
-            let value = match slbl(&args, &sim.sym).filter(|v| {
-                *v >= i64::MIN as i128 && *v <= i64::MAX as i128
-            }) {
+            let value = match slbl(&args, &sim.sym)
+                .filter(|v| *v >= i64::MIN as i128 && *v <= i64::MAX as i128)
+            {
                 Some(v) => v,
                 None => fail!("Wrong EQU value/expr (no forward labels allowed)"),
             };
             sim.sym.insert(label.clone(), tcl::a64(value as i64 as u64));
             continue;
         }
-        if sim.regs.pc % 4 != 0 {
+        if !sim.regs.pc.is_multiple_of(4) {
             sim.regs.pc = sim.regs.pc / 4 * 4 + 4;
             if !label.is_empty() {
                 sim.sym.insert(label.clone(), tcl::a64(sim.regs.pc));
@@ -616,8 +640,7 @@ pub fn assemble(sim: &mut Simulator, body: &str) -> Result<String, AsmError> {
         let norm = normalize_args(arg_text, &op);
         sim.line_to_addr.insert(line_idx, sim.regs.pc);
         sim.addr_to_line.insert(sim.regs.pc, line_idx);
-        sim.mem
-            .insert_instruction(sim.regs.pc, &op, norm, &lineorg);
+        sim.mem.insert_instruction(sim.regs.pc, &op, norm, &lineorg);
         sim.regs.pc = sim.regs.pc.wrapping_add(4);
     }
     if !sim.sym.contains_key("START") {
@@ -792,7 +815,9 @@ pub fn dump(sim: &mut Simulator) -> String {
                 expr,
                 source_line,
             }) => {
-                let raw = expr.clone().unwrap_or_else(|| rvs_memory::render_value(value, case));
+                let raw = expr
+                    .clone()
+                    .unwrap_or_else(|| rvs_memory::render_value(value, case));
                 let (evaluated, new_value, err) = match slbl(&raw, &sim.sym) {
                     Some(v) if v >= i64::MIN as i128 && v <= u64::MAX as i128 => {
                         (format!("0x{:016x}", v as u64), v as u64, false)
@@ -833,10 +858,21 @@ pub fn dump(sim: &mut Simulator) -> String {
                 let enc = encode(&cell.op, &cell.raw_args, addr, &sim.sym);
                 let new_op = enc.asmx.first().cloned().unwrap_or_default();
                 let new_args: Vec<String> = enc.asmx.iter().skip(1).cloned().collect();
-                if let Some(rvs_memory::MemoryCell::Instruction(c)) = sim.mem.cells.get_mut(&addr)
-                {
-                    c.op = new_op.clone();
-                    c.args = new_args.clone();
+                // Only a successful encoding may replace the cell's operands.
+                // Writing the error placeholder back would hand the executor
+                // `["rd,rs1,imm"]` instead of real operands.
+                if let Some(rvs_memory::MemoryCell::Instruction(c)) = sim.mem.cells.get_mut(&addr) {
+                    c.encode_error = if enc.unknown_op {
+                        None
+                    } else {
+                        enc.error
+                            .as_deref()
+                            .map(|m| m.trim_start_matches("ERROR: ").to_string())
+                    };
+                    if enc.error.is_none() {
+                        c.op = new_op.clone();
+                        c.args = new_args.clone();
+                    }
                 }
                 res.push_str(&addr_hex);
                 if sim.view.list_bin {
@@ -846,14 +882,18 @@ pub fn dump(sim: &mut Simulator) -> String {
                 if sim.view.list_hex {
                     res.push(' ');
                     res.push_str(&tcl::fmt_s_pad(
-                        &fmti(enc.asmx.first().map(String::as_str).unwrap_or(""), &new_args),
+                        &fmti(
+                            enc.asmx.first().map(String::as_str).unwrap_or(""),
+                            &new_args,
+                        ),
                         25,
                     ));
                 }
                 if sim.view.list_int {
                     let words: Vec<&str> = enc.asm.split_whitespace().collect();
                     let int_op = words.first().copied().unwrap_or("");
-                    let int_rest: Vec<String> = words.iter().skip(1).map(|s| s.to_string()).collect();
+                    let int_rest: Vec<String> =
+                        words.iter().skip(1).map(|s| s.to_string()).collect();
                     res.push(' ');
                     res.push_str(&tcl::fmt_s_pad(&fmti(int_op, &int_rest), 25));
                 }

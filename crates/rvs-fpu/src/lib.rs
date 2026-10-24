@@ -1,9 +1,7 @@
 //! Floating-point (RV64FD) instruction handlers.
 
 use rvs_memory::{SimError, SimResult};
-use rvs_sim::{
-    imm_raw, read_reg_arg, read_x_arg, reg_index, write_x, Simulator,
-};
+use rvs_sim::{imm_raw, read_reg_arg, read_x_arg, reg_index, write_x, Simulator};
 use rvs_tcl as tcl;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -161,7 +159,11 @@ pub fn fcvt_to_int(sim: &mut Simulator, args: &[String], unsigned: bool) -> SimR
 /// `FCVT.D.L` / `FCVT.D.LU`: integer register to double.
 pub fn fcvt_to_float(sim: &mut Simulator, args: &[String], unsigned: bool) -> SimResult<()> {
     let raw = read_reg_arg(sim, &args[1])?;
-    let value = if unsigned { raw as f64 } else { raw as i64 as f64 };
+    let value = if unsigned {
+        raw as f64
+    } else {
+        raw as i64 as f64
+    };
     let idx = reg_index(&args[0])?;
     sim.regs.write_f64(idx, value, false);
     Ok(())
@@ -219,8 +221,11 @@ pub fn fsmem(sim: &mut Simulator, args: &[String], nbytes: usize) -> SimResult<(
     let addr = base.wrapping_add(imm_raw(&args[2])?);
     let idx = reg_index(&args[0])?;
     let bits = sim.regs.read_f_bits(idx);
-    let mask = if nbytes == 8 { u64::MAX } else { (1u64 << (nbytes * 8)) - 1 };
+    let mask = if nbytes == 8 {
+        u64::MAX
+    } else {
+        (1u64 << (nbytes * 8)) - 1
+    };
     let val = bits & mask;
-    sim.mem
-        .write_bytes(addr, nbytes, val, sim.regs.f_case(idx))
+    sim.mem.write_bytes(addr, nbytes, val, sim.regs.f_case(idx))
 }

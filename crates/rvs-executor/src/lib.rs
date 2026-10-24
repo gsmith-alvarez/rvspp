@@ -10,17 +10,15 @@
 
 use std::time::{Duration, Instant};
 
-use rvs_memory::SimError;
-use rvs_memory::SimResult;
-use rvs_tcl as tcl;
-use rvs_sim::{
-    imm12, imm20, imm_raw, read_x_arg, reg_index, write_x, Simulator,
-};
 use rvs_ecall::ecall;
 use rvs_fpu::{
-    fcvt_to_float, fcvt_to_int, flmem, fminmax, fmv_d_x, fmv_x_d, fsqrt, fsgnj, fsmem, type_fr,
+    fcvt_to_float, fcvt_to_int, flmem, fminmax, fmv_d_x, fmv_x_d, fsgnj, fsmem, fsqrt, type_fr,
     FOp, SgnMode,
 };
+use rvs_memory::SimError;
+use rvs_memory::SimResult;
+use rvs_sim::{imm12, imm20, imm_raw, read_x_arg, reg_index, write_x, Simulator};
+use rvs_tcl as tcl;
 
 /// Result of one `step` call.
 #[derive(Debug)]
@@ -78,7 +76,11 @@ fn alu(op: AluOp, a: u64, b: u64, unsigned: bool) -> SimResult<u64> {
         (AluOp::Xor, true) => (a as i128) ^ (b as i128),
         (AluOp::Add, true) => a as i128 + b as i128,
         (AluOp::Sll, _) => {
-            let amount = if unsigned { b as i128 } else { b as i64 as i128 };
+            let amount = if unsigned {
+                b as i128
+            } else {
+                b as i64 as i128
+            };
             if amount < 0 {
                 return Err(SimError("negative shift argument".to_string()));
             }
@@ -152,7 +154,11 @@ fn smem(sim: &mut Simulator, args: &[String], nbytes: usize) -> SimResult<()> {
     let addr = base.wrapping_add(imm12(&args[2])? as u64);
     let idx = reg_index(&args[0])?;
     let reg_val = sim.regs.read_x(idx);
-    let mask = if nbytes == 8 { u64::MAX } else { (1u64 << (nbytes * 8)) - 1 };
+    let mask = if nbytes == 8 {
+        u64::MAX
+    } else {
+        (1u64 << (nbytes * 8)) - 1
+    };
     let val = reg_val & mask;
     let upper = sim.regs.x_case(idx);
     sim.mem.write_bytes(addr, nbytes, val, upper)
@@ -163,7 +169,9 @@ fn lmem(sim: &mut Simulator, args: &[String], nbytes: usize, unsigned: bool) -> 
     let base = read_x_arg(sim, &args[1])?;
     let addr = base.wrapping_add(imm12(&args[2])? as u64);
     let bits = sim.mem.read_bytes(addr, nbytes)?;
-    let value = if !unsigned && (bits >> (nbytes * 8 - 1)) & 1 == 1 {
+    // Sign-extend sub-word loads; a doubleword is already 64 bits wide (a
+    // `1 << 64` mask would overflow).
+    let value = if !unsigned && nbytes < 8 && (bits >> (nbytes * 8 - 1)) & 1 == 1 {
         bits | !((1u64 << (nbytes * 8)) - 1)
     } else {
         bits
@@ -195,11 +203,7 @@ fn type_sb(sim: &mut Simulator, args: &[String], op: BranchOp, unsigned: bool) -
     };
     if taken {
         let off = imm12(&args[2])?;
-        sim.regs.pc = sim
-            .regs
-            .pc
-            .wrapping_add((off << 1) as u64)
-            .wrapping_sub(4);
+        sim.regs.pc = sim.regs.pc.wrapping_add((off << 1) as u64).wrapping_sub(4);
     }
     Ok(())
 }
@@ -229,8 +233,16 @@ fn type_rm(sim: &mut Simulator, args: &[String], kind: RmKind) -> SimResult<()> 
         RmKind::Div | RmKind::Rem => (true, true, false),
         RmKind::DivU | RmKind::RemU => (false, false, false),
     };
-    let sa = if signed_a { a as i64 as i128 } else { a as i128 };
-    let sb = if signed_b { b as i64 as i128 } else { b as i128 };
+    let sa = if signed_a {
+        a as i64 as i128
+    } else {
+        a as i128
+    };
+    let sb = if signed_b {
+        b as i64 as i128
+    } else {
+        b as i128
+    };
     let value: u64 = match kind {
         RmKind::Mul | RmKind::MulH | RmKind::MulHSu | RmKind::MulHu => {
             // MULHU's unsigned product reaches 128 bits; i128 is signed so
@@ -251,7 +263,11 @@ fn type_rm(sim: &mut Simulator, args: &[String], kind: RmKind) -> SimResult<()> 
                 return Err(SimError("divide by zero".to_string()));
             }
             let q = sa / sb;
-            let q = if sa % sb != 0 && ((sa < 0) != (sb < 0)) { q - 1 } else { q };
+            let q = if sa % sb != 0 && ((sa < 0) != (sb < 0)) {
+                q - 1
+            } else {
+                q
+            };
             if kind == RmKind::Div {
                 tcl::low64(q)
             } else {
@@ -306,6 +322,9 @@ fn type_wi(sim: &mut Simulator, args: &[String], kind: WKind) -> SimResult<()> {
 /// 32-bit word variants added by this rewrite (standard RV64 semantics).
 /// ALU-family ops inherit the uppercase writer convention, `*div` the
 /// lowercase `typeRM` convention.
+// Division by zero and MIN/-1 have two *different* Tcl fallbacks (-1 and MIN),
+// so `checked_div` cannot express this; the explicit zero check stays.
+#[allow(clippy::manual_checked_ops)]
 fn type_w(sim: &mut Simulator, args: &[String], kind: WKind) -> SimResult<()> {
     let a = read_x_arg(sim, &args[1])?;
     let b = read_x_arg(sim, &args[2])?;
@@ -369,6 +388,20 @@ type ExecResult = Result<bool, SimError>;
 fn execute(sim: &mut Simulator, op: &str, args: &[String]) -> ExecResult {
     let upper = op.to_ascii_uppercase();
     let s: Vec<String> = args.to_vec();
+    // A cell whose operands were rewritten to an error placeholder (or a
+    // malformed source line) must surface as a clean trace error, never as an
+    // out-of-bounds index.
+    let need = match upper.as_str() {
+        "JAL" | "LUI" | "AUIPC" => 2,
+        "EBREAK" => 0,
+        _ => 3,
+    };
+    // Only known mnemonics get the arity check; an unknown one must reach the
+    // default arm so the message stays `invalid command name` like the
+    // reference's `eval`.
+    if s.len() < need && rvs_asm_syntax::find_instr(op).is_some() {
+        return Err(SimError(format!("MUST HAVE {need} ARGS")));
+    }
     let r = match upper.as_str() {
         "ADD" => type_r(sim, &s, AluOp::Add, false),
         "SUB" => type_r(sim, &s, AluOp::Sub, false),
@@ -412,7 +445,7 @@ fn execute(sim: &mut Simulator, op: &str, args: &[String]) -> ExecResult {
         "LUI" => lui(sim, &s),
         "AUIPC" => auipc(sim, &s),
         "EBREAK" => ebreak(sim),
-        "ECALL" => return ecall(sim, &s).map(|needs| needs),
+        "ECALL" => return ecall(sim, &s),
         "MUL" => type_rm(sim, &s, RmKind::Mul),
         "MULH" => type_rm(sim, &s, RmKind::MulH),
         "MULHSU" => type_rm(sim, &s, RmKind::MulHSu),
@@ -465,11 +498,7 @@ fn jal(sim: &mut Simulator, args: &[String]) -> SimResult<()> {
     let ret = sim.regs.pc;
     write_x(sim, &args[0], ret, true)?;
     let off = imm20(&args[1])?;
-    sim.regs.pc = sim
-        .regs
-        .pc
-        .wrapping_add((off << 1) as u64)
-        .wrapping_sub(4);
+    sim.regs.pc = sim.regs.pc.wrapping_add((off << 1) as u64).wrapping_sub(4);
     Ok(())
 }
 
@@ -525,27 +554,47 @@ pub fn step(sim: &mut Simulator) -> StepResult {
         ),
     };
     // Trace line: address + hex operands (+ source when TXT is enabled).
-    let mut trace = format!(
-        "0x{inst_pc:016x} {}",
-        rvs_asm_syntax::fmti(&op, &args)
-    );
-    if sim.view.exec_txt && !source.is_empty() {
-        trace.push(' ');
-        trace.push_str(&rvs_asm_syntax::render_line_f1(&rvs_asm_syntax::split_line(
-            &source,
-        )));
+    // Tracing is optional: `--no-trace` skips the per-instruction formatting,
+    // which is what dominates batch throughput on long runs.
+    if sim.trace {
+        let mut trace = format!("0x{inst_pc:016x} {}", rvs_asm_syntax::fmti(&op, &args));
+        if sim.view.exec_txt && !source.is_empty() {
+            trace.push(' ');
+            trace.push_str(&rvs_asm_syntax::render_line_f1(
+                &rvs_asm_syntax::split_line(&source),
+            ));
+        }
+        trace.push('\n');
+        sim.exec_log.push_str(&trace);
     }
-    trace.push('\n');
-    sim.exec_log.push_str(&trace);
+    // An instruction whose encoding failed is not executable. Report the
+    // encoder diagnostic and halt where the reference's `eval` would error.
+    if let rvs_memory::MemoryCell::Instruction(c) = &cell {
+        if let Some(msg) = &c.encode_error {
+            sim.exec_log.push_str(&format!("ERROR: {msg}\n"));
+            sim.last_error.get_or_insert_with(|| msg.clone());
+            sim.regs.pc = inst_pc;
+            return StepResult::Halted;
+        }
+    }
     let op_upper = op.to_ascii_uppercase();
     let is_call = match op_upper.as_str() {
-        "JAL" => args.first().map(|r| r != "x0" && r != "zero").unwrap_or(false),
-        "JALR" => args.first().map(|r| r != "x0" && r != "zero").unwrap_or(false),
+        "JAL" => args
+            .first()
+            .map(|r| r != "x0" && r != "zero")
+            .unwrap_or(false),
+        "JALR" => args
+            .first()
+            .map(|r| r != "x0" && r != "zero")
+            .unwrap_or(false),
         _ => false,
     };
 
     let is_ret = op_upper == "JALR"
-        && args.first().map(|r| r == "x0" || r == "zero").unwrap_or(false)
+        && args
+            .first()
+            .map(|r| r == "x0" || r == "zero")
+            .unwrap_or(false)
         && args.get(1).map(|r| r == "x1" || r == "ra").unwrap_or(false);
 
     let step_res = match execute(sim, &op, &args) {
@@ -558,16 +607,24 @@ pub fn step(sim: &mut Simulator) -> StepResult {
                 sim.regs.pc = sim.regs.pc.wrapping_sub(4);
             } else {
                 sim.exec_log.push_str(&format!("ERROR: {}\n", e.0));
+                sim.last_error.get_or_insert_with(|| e.0.clone());
                 sim.regs.pc = inst_pc;
             }
             StepResult::Halted
         }
     };
+    // `exit` in the a7 ABI ends the run where the reference's `ebreak` would.
+    if sim.exit_requested {
+        return StepResult::Halted;
+    }
     if is_call && sim.convention.enabled {
         let target_pc = sim.regs.pc;
         let caller_name = sim.find_symbol_name(inst_pc);
         let function_name = sim.find_symbol_name(target_pc);
-        if let Some(w) = sim.convention.on_call(inst_pc, target_pc, caller_name, function_name, &sim.regs) {
+        if let Some(w) =
+            sim.convention
+                .on_call(inst_pc, target_pc, caller_name, function_name, &sim.regs)
+        {
             sim.exec_log.push_str(&format!("WARN [Convention]: {w}\n"));
         }
     }
@@ -599,8 +656,8 @@ pub fn step(sim: &mut Simulator) -> StepResult {
         "SD" | "SW" | "SH" | "SB" | "FSD" => {
             sim.metrics.stores += 1;
         }
-        "MUL" | "MULH" | "MULHSU" | "MULHU" | "DIV" | "DIVU" | "REM" | "REMU"
-        | "MULW" | "DIVW" | "DIVUW" | "REMW" | "REMUW" => {
+        "MUL" | "MULH" | "MULHSU" | "MULHU" | "DIV" | "DIVU" | "REM" | "REMU" | "MULW" | "DIVW"
+        | "DIVUW" | "REMW" | "REMUW" => {
             sim.metrics.alu_ops += 1;
             sim.metrics.cycles += 2;
         }
@@ -623,6 +680,7 @@ pub fn step(sim: &mut Simulator) -> StepResult {
 /// The caller appends the `START`/`RUN` marker and sets the PC.
 pub fn run(sim: &mut Simulator, timeout_ms: u64) -> RunStatus {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    sim.last_error = None;
     let mut halted = false;
     loop {
         if sim.brk {

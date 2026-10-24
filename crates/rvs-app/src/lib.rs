@@ -4,12 +4,14 @@
 //! [`rvs_machine::Machine`]. Swapping the backend swaps the language/ISA; the
 //! editor, explorer, commands, event loop and renderers stay unchanged.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use rvs_editor::Editor;
-use rvs_machine::{Dialect, Machine, RegisterChanges, StepOutcome, ViewFlags, ViewRequest};
+use rvs_machine::{
+    Dialect, LoadOutcome, Machine, RegisterChanges, StepOutcome, ViewFlags, ViewRequest,
+};
 
 /// Parse one batch-entry line: `<asm> <in> <out> [timeout_ms]`.
 ///
@@ -41,6 +43,7 @@ pub enum Mode {
     Input,
     Running,
     Command,
+    Search,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -198,12 +201,24 @@ pub struct App<M: Machine> {
     pub explorer: rvs_explorer::FileExplorerState,
     pub command_input: String,
     pub pending_op: Option<char>,
+    /// Digits typed before a motion (`3j`, `2dd`).
+    pub pending_count: Option<usize>,
+    /// Live `/` prompt text.
+    pub search_input: String,
+    /// Last committed search pattern (repeat with Ctrl+N / Ctrl+P).
+    pub search_query: String,
     pub zoomed_pane: Option<Pane>,
     pub pending_external_editor: bool,
     pub colorize_listing: bool,
     /// UI-owned checkbutton state.
     pub view: ViewFlags,
     pub breakpoints: BTreeSet<u64>,
+    /// Address → last seen cell value. Fires when the value changes.
+    pub watchpoints: BTreeMap<u64, u64>,
+    /// Address → condition expression; the breakpoint only fires when non-zero.
+    pub break_conditions: BTreeMap<u64, String>,
+    /// Set by `do_step` when the last instruction halted the machine.
+    pub last_step_halted: bool,
     pub step_history: VecDeque<M::Snapshot>,
     pub run_speed: RunSpeed,
     pub at_breakpoint: bool,
@@ -233,6 +248,8 @@ impl<M: Machine> App<M> {
             }
         }
         machine.set_source(&editor.text());
+        let detected = machine.detect_dialect(&editor.text());
+        machine.set_dialect(detected);
         machine.set_convention_enabled(true);
         let snapshot = machine.snapshot();
         Self {
@@ -261,11 +278,17 @@ impl<M: Machine> App<M> {
             explorer: rvs_explorer::FileExplorerState::new(),
             command_input: String::new(),
             pending_op: None,
+            pending_count: None,
+            search_input: String::new(),
+            search_query: String::new(),
             zoomed_pane: None,
             pending_external_editor: false,
             colorize_listing: true,
             view: ViewFlags::default(),
             breakpoints: BTreeSet::new(),
+            watchpoints: BTreeMap::new(),
+            break_conditions: BTreeMap::new(),
+            last_step_halted: false,
             step_history: VecDeque::new(),
             run_speed: RunSpeed::Max,
             at_breakpoint: false,
@@ -309,6 +332,8 @@ impl<M: Machine> App<M> {
         self.take_reg_snapshot();
         self.needs_full_clear = true;
         self.breakpoints.clear();
+        self.break_conditions.clear();
+        self.watchpoints.clear();
         self.step_history.clear();
     }
 
@@ -317,7 +342,13 @@ impl<M: Machine> App<M> {
         self.running = false;
         self.was_running = false;
         self.input_line.clear();
-        let _ = self.machine.load(&src);
+        self.status = match self.machine.load(&src) {
+            LoadOutcome::Ok => "Compiled".to_string(),
+            LoadOutcome::Err(e) => format!("ERROR: {}", e.message),
+        };
+        // Snapshots from the previous program cannot be rewound into this one.
+        self.step_history.clear();
+        self.take_reg_snapshot();
         let (out, inp) = self.machine.dma_availability();
         self.dma_out_available = out;
         self.dma_inp_available = inp;
@@ -394,13 +425,17 @@ impl<M: Machine> App<M> {
 
     pub fn do_step(&mut self) {
         if self.step_history.len() >= 128 {
-            self.step_history.pop_front();
+            if let Some(dropped) = self.step_history.pop_front() {
+                self.machine.forget(&dropped);
+            }
         }
         self.step_history.push_back(self.machine.snapshot());
         self.take_reg_snapshot();
+        self.last_step_halted = false;
         match self.machine.step() {
             StepOutcome::Continued => {}
             StepOutcome::Halted => {
+                self.last_step_halted = true;
                 self.running = false;
                 if self.mode == Mode::Running {
                     self.mode = Mode::Normal;
@@ -414,6 +449,119 @@ impl<M: Machine> App<M> {
             }
         }
         self.mark_changed_regs();
+    }
+
+    // ----- step over / out, watchpoints --------------------------------
+
+    /// `:next` — step over a call instead of into it.
+    pub fn step_over(&mut self) {
+        if !self.machine.at_call() {
+            self.do_step();
+            self.status = "Step over: 1 instruction".to_string();
+            return;
+        }
+        let target = self.machine.pc().wrapping_add(4);
+        self.run_until(target, "Step over");
+    }
+
+    /// `:finish` — run until the current function returns.
+    pub fn step_out(&mut self) {
+        match self.machine.return_address() {
+            Some(target) => self.run_until(target, "Finish"),
+            None => self.status = "No active frame to return to".to_string(),
+        }
+    }
+
+    /// Run until `target` (temporary breakpoint), another breakpoint, a
+    /// watchpoint, a halt or the step budget.
+    fn run_until(&mut self, target: u64, label: &str) {
+        let inserted = self.breakpoints.insert(target);
+        let mut steps = 0usize;
+        while steps < 200_000 {
+            if self.machine.pc() == target {
+                break;
+            }
+            let pc = self.machine.pc();
+            if pc != target && self.breakpoints.contains(&pc) && self.condition_met(pc) {
+                break;
+            }
+            self.do_step();
+            steps += 1;
+            if self.last_step_halted || self.check_watchpoints() {
+                break;
+            }
+            if self.mode == Mode::Input {
+                break;
+            }
+        }
+        if inserted {
+            self.breakpoints.remove(&target);
+        }
+        self.status = format!("{label}: {steps} instruction(s)");
+        self.needs_full_clear = true;
+    }
+
+    /// A breakpoint with a condition fires only when the expression is non-zero.
+    fn condition_met(&self, addr: u64) -> bool {
+        match self.break_conditions.get(&addr) {
+            None => true,
+            // An unevaluatable condition fires: better noisy than silent.
+            Some(expr) => self.machine.eval_expr(expr).map(|v| v != 0).unwrap_or(true),
+        }
+    }
+
+    /// Compare watched cells with their recorded values; stop on change.
+    pub fn check_watchpoints(&mut self) -> bool {
+        let changed = self
+            .watchpoints
+            .iter()
+            .find(|(&addr, &last)| self.machine.peek_mem(addr) != last)
+            .map(|(&addr, _)| addr);
+        match changed {
+            Some(addr) => {
+                let value = self.machine.peek_mem(addr);
+                self.watchpoints.insert(addr, value);
+                self.running = false;
+                self.was_running = false;
+                self.at_breakpoint = false;
+                if self.mode == Mode::Running {
+                    self.mode = Mode::Normal;
+                }
+                self.status = format!("Watchpoint 0x{addr:016x} = 0x{value:016x}");
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// `:watch <addr|label|sp>` — stop when the cell's value changes.
+    pub fn add_watchpoint(&mut self, addr: u64) {
+        let value = self.machine.peek_mem(addr);
+        self.watchpoints.insert(addr, value);
+        self.status = format!("Watchpoint 0x{addr:016x} (now 0x{value:016x})");
+    }
+
+    pub fn remove_watchpoint(&mut self, addr: u64) -> bool {
+        self.watchpoints.remove(&addr).is_some()
+    }
+
+    pub fn clear_watchpoints(&mut self) {
+        self.watchpoints.clear();
+        self.status = "Cleared all watchpoints".to_string();
+    }
+
+    /// Attach/clear a condition on an existing breakpoint (`:b <t> if <expr>`).
+    pub fn set_break_condition(&mut self, addr: u64, condition: Option<String>) {
+        match condition {
+            Some(expr) if !expr.trim().is_empty() => {
+                self.break_conditions.insert(addr, expr.clone());
+                self.status = format!("Breakpoint 0x{addr:016x} if {expr}");
+            }
+            _ => {
+                self.break_conditions.remove(&addr);
+                self.status = format!("Cleared condition on 0x{addr:016x}");
+            }
+        }
     }
 
     pub fn action_step_back(&mut self) {
@@ -464,8 +612,66 @@ impl<M: Machine> App<M> {
         }
     }
 
+    /// `:abi` — select the syscall convention.
+    pub fn set_abi(&mut self, name: &str) {
+        match name.to_ascii_lowercase().as_str() {
+            "a7" | "rars" | "gnu" => {
+                self.machine.set_a7_abi(true);
+                self.status = "Syscall ABI: a7 (a0/a1 args, a7 selector)".to_string();
+            }
+            "rvs" | "rvs046" | "course" | "" => {
+                self.machine.set_a7_abi(false);
+                self.status = "Syscall ABI: RVS (ecall rd, rs1, imm)".to_string();
+            }
+            other => self.status = format!("ERROR: unknown ABI \"{other}\" (rvs|a7)"),
+        }
+    }
+
+    /// Resolve `pc`, a source line (1-based), a label or an address.
+    pub fn resolve_code_target(&self, s: &str) -> Option<u64> {
+        let s = s.trim();
+        if s.is_empty() {
+            return None;
+        }
+        if s.eq_ignore_ascii_case("pc") {
+            return Some(self.machine.pc());
+        }
+        if let Ok(line) = s.parse::<usize>() {
+            if let Some((_, addr)) = self.machine.nearest_line_address(line.saturating_sub(1)) {
+                return Some(addr);
+            }
+        }
+        if let Some(addr) = self.machine.symbol_address(s) {
+            return Some(addr);
+        }
+        rvs_machine::parse_u64(s)
+    }
+
+    /// Resolve `sp`, a label or an address to a data address.
+    pub fn resolve_data_target(&self, s: &str) -> Option<u64> {
+        let s = s.trim();
+        if s.is_empty() {
+            return None;
+        }
+        if s.eq_ignore_ascii_case("sp") {
+            return Some(self.machine.sp());
+        }
+        if let Some(addr) = self.machine.symbol_address(s) {
+            return Some(addr);
+        }
+        rvs_machine::parse_u64(s)
+    }
+
+    /// Set (never toggle) a breakpoint, for `:b <t> if <expr>`.
+    pub fn add_breakpoint(&mut self, addr: u64) {
+        self.breakpoints.insert(addr);
+        self.status = format!("Breakpoint set at 0x{addr:016x}");
+        self.needs_full_clear = true;
+    }
+
     pub fn clear_all_breakpoints(&mut self) {
         self.breakpoints.clear();
+        self.break_conditions.clear();
         self.status = "Cleared all breakpoints".to_string();
         self.needs_full_clear = true;
     }
@@ -504,7 +710,10 @@ impl<M: Machine> App<M> {
         let mut first = true;
         while !self.machine.stop_requested() {
             let pc = self.machine.pc();
-            if (!first || !self.at_breakpoint) && self.breakpoints.contains(&pc) {
+            if (!first || !self.at_breakpoint)
+                && self.breakpoints.contains(&pc)
+                && self.condition_met(pc)
+            {
                 self.running = false;
                 self.was_running = false;
                 self.mode = Mode::Normal;
@@ -532,6 +741,9 @@ impl<M: Machine> App<M> {
                     self.running = false;
                     break;
                 }
+            }
+            if self.check_watchpoints() {
+                break;
             }
         }
         if self.machine.stop_requested() {
@@ -581,6 +793,51 @@ impl<M: Machine> App<M> {
         }
     }
 
+    // ----- search ------------------------------------------------------
+
+    /// `/`: open the search prompt over the source buffer.
+    pub fn begin_search(&mut self) {
+        self.pending_op = None;
+        self.focus = Pane::Source;
+        self.mode = Mode::Search;
+        self.search_input.clear();
+    }
+
+    /// Enter in the search prompt.
+    pub fn commit_search(&mut self) {
+        self.mode = Mode::Normal;
+        let needle = self.search_input.clone();
+        if needle.is_empty() {
+            return;
+        }
+        self.search_query = needle;
+        self.search_step(true);
+    }
+
+    /// Repeat the last search (`Ctrl+N` / `Ctrl+P`).
+    pub fn search_repeat(&mut self, forward: bool) {
+        if self.search_query.is_empty() {
+            self.status = "No previous search".to_string();
+            return;
+        }
+        self.search_step(forward);
+    }
+
+    fn search_step(&mut self, forward: bool) {
+        let needle = self.search_query.clone();
+        if self.editor.find(&needle, forward) {
+            self.status = format!(
+                "{}: {} @ {}:{}",
+                if forward { "Next" } else { "Prev" },
+                needle,
+                self.editor.row + 1,
+                self.editor.col + 1
+            );
+        } else {
+            self.status = format!("Pattern not found: {needle}");
+        }
+    }
+
     // ----- file actions ------------------------------------------------
 
     pub fn load_file(&mut self, path: &str, append: bool) {
@@ -596,6 +853,8 @@ impl<M: Machine> App<M> {
                     self.editor.set_text(&text);
                     self.fname = path.to_string();
                     self.editor.modified = false;
+                    let detected = self.machine.detect_dialect(&self.editor.text());
+                    self.machine.set_dialect(detected);
                 }
                 self.reset_sim_panes();
                 self.status = format!("Loaded {path}");
@@ -758,7 +1017,7 @@ impl<M: Machine> App<M> {
     }
 
     pub fn blink_on(&self) -> bool {
-        (self.tick / 4) % 2 == 0
+        (self.tick / 4).is_multiple_of(2)
     }
 
     /// Dialect exposed to command handlers without importing the backend.

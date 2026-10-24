@@ -29,26 +29,22 @@ pub fn split_line(line: &str) -> Line {
             if ch == '"' {
                 q1 = !q1;
             }
-            if ch == '#' || ch == ';' || (ch == '/' && orig.get(i + 1) == Some(&'/')) {
-                if !q1 {
-                    // Tcl reassigns on every unquoted hit; later hits shrink
-                    // the working string and can blank the comment.
-                    cm = tcl_string_range(&ln, i as i64, i64::MAX);
-                    ln = tcl_string_range(&ln, 0, i as i64 - 1);
-                }
+            if (ch == '#' || ch == ';' || (ch == '/' && orig.get(i + 1) == Some(&'/'))) && !q1 {
+                // Tcl reassigns on every unquoted hit; later hits shrink
+                // the working string and can blank the comment.
+                cm = tcl_string_range(&ln, i as i64, i64::MAX);
+                ln = tcl_string_range(&ln, 0, i as i64 - 1);
             }
         }
     }
     let mut label = String::new();
     if let Some(i) = ln.find(':') {
         label = tcl_string_range(&ln, 0, i as i64 - 1);
-        ln = tcl_string_range(&ln, i as i64 + 1, i64::MAX).trim().to_string();
+        ln = tcl_string_range(&ln, i as i64 + 1, i64::MAX)
+            .trim()
+            .to_string();
     }
-    let op = ln
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .to_string();
+    let op = ln.split_whitespace().next().unwrap_or("").to_string();
     let args = tcl_string_range(&ln, op.chars().count() as i64, i64::MAX)
         .trim()
         .to_string();
@@ -176,20 +172,17 @@ pub fn tcl_expr(text: &str) -> Option<i128> {
         let rest: String = chars[i..].iter().collect();
         let mut matched = None;
         for op in [
-            "<<", ">>", "<=", ">=", "==", "!=", "&&", "||", "+", "-", "*", "/", "%", "&", "<",
-            ">",
+            "<<", ">>", "<=", ">=", "==", "!=", "&&", "||", "+", "-", "*", "/", "%", "&", "<", ">",
         ] {
             if rest.starts_with(op) {
                 matched = Some(op);
                 break;
             }
         }
-        match matched {
-            Some(op) => {
-                toks.push(Tok::Op(op.to_string()));
-                i += op.len();
-            }
-            None => return None,
+        {
+            let op = matched?;
+            toks.push(Tok::Op(op.to_string()));
+            i += op.len();
         }
     }
     if toks.is_empty() {
@@ -198,7 +191,7 @@ pub fn tcl_expr(text: &str) -> Option<i128> {
 
     // Tcl operator precedence: || < && < ==/!= < relational < & < shifts
     // < additive < multiplicative < unary. A bare `|` never survives `slbl`.
-    fn bin<'a>(toks: &'a [Tok], pos: &mut usize, ops: &[&str]) -> Option<String> {
+    fn bin(toks: &[Tok], pos: &mut usize, ops: &[&str]) -> Option<String> {
         if let Some(Tok::Op(op)) = toks.get(*pos) {
             if ops.contains(&op.as_str()) {
                 let o = op.clone();
@@ -259,70 +252,55 @@ pub fn tcl_expr(text: &str) -> Option<i128> {
     }
     fn parse_mul(toks: &[Tok], pos: &mut usize) -> Option<i128> {
         let mut left = parse_unary(toks, pos)?;
-        loop {
-            match bin(toks, pos, &["*", "/", "%"]) {
-                Some(op) => {
-                    let right = parse_unary(toks, pos)?;
-                    left = match op.as_str() {
-                        "*" => left.checked_mul(right)?,
-                        "/" => {
-                            if right == 0 {
-                                return None;
-                            }
-                            let q = left / right;
-                            let q = if left % right != 0 && ((left < 0) != (right < 0)) {
-                                q - 1
-                            } else {
-                                q
-                            };
-                            q
-                        }
-                        _ => {
-                            if right == 0 {
-                                return None;
-                            }
-                            let q = left / right;
-                            let q = if left % right != 0 && ((left < 0) != (right < 0)) {
-                                q - 1
-                            } else {
-                                q
-                            };
-                            left - q * right
-                        }
-                    };
+        while let Some(op) = bin(toks, pos, &["*", "/", "%"]) {
+            let right = parse_unary(toks, pos)?;
+            left = match op.as_str() {
+                "*" => left.checked_mul(right)?,
+                "/" => {
+                    if right == 0 {
+                        return None;
+                    }
+                    let q = left / right;
+
+                    if left % right != 0 && ((left < 0) != (right < 0)) {
+                        q - 1
+                    } else {
+                        q
+                    }
                 }
-                None => break,
-            }
+                _ => {
+                    if right == 0 {
+                        return None;
+                    }
+                    let q = left / right;
+                    let q = if left % right != 0 && ((left < 0) != (right < 0)) {
+                        q - 1
+                    } else {
+                        q
+                    };
+                    left - q * right
+                }
+            };
         }
         Some(left)
     }
     fn parse_add(toks: &[Tok], pos: &mut usize) -> Option<i128> {
         let mut left = parse_mul(toks, pos)?;
-        loop {
-            match bin(toks, pos, &["+", "-"]) {
-                Some(op) => {
-                    let right = parse_mul(toks, pos)?;
-                    left = if op == "+" {
-                        left.checked_add(right)?
-                    } else {
-                        left.checked_sub(right)?
-                    };
-                }
-                None => break,
-            }
+        while let Some(op) = bin(toks, pos, &["+", "-"]) {
+            let right = parse_mul(toks, pos)?;
+            left = if op == "+" {
+                left.checked_add(right)?
+            } else {
+                left.checked_sub(right)?
+            };
         }
         Some(left)
     }
     fn parse_shift(toks: &[Tok], pos: &mut usize) -> Option<i128> {
         let mut left = parse_add(toks, pos)?;
-        loop {
-            match bin(toks, pos, &["<<", ">>"]) {
-                Some(op) => {
-                    let right = parse_add(toks, pos)?;
-                    left = shift(left, &op, right)?;
-                }
-                None => break,
-            }
+        while let Some(op) = bin(toks, pos, &["<<", ">>"]) {
+            let right = parse_add(toks, pos)?;
+            left = shift(left, &op, right)?;
         }
         Some(left)
     }
@@ -336,32 +314,26 @@ pub fn tcl_expr(text: &str) -> Option<i128> {
     }
     fn parse_rel(toks: &[Tok], pos: &mut usize) -> Option<i128> {
         let mut left = parse_bitand(toks, pos)?;
-        loop {
-            match bin(toks, pos, &["<", "<=", ">", ">="]) {
-                Some(op) => {
-                    let right = parse_bitand(toks, pos)?;
-                    left = match op.as_str() {
-                        "<" => i128::from(left < right),
-                        "<=" => i128::from(left <= right),
-                        ">" => i128::from(left > right),
-                        _ => i128::from(left >= right),
-                    };
-                }
-                None => break,
-            }
+        while let Some(op) = bin(toks, pos, &["<", "<=", ">", ">="]) {
+            let right = parse_bitand(toks, pos)?;
+            left = match op.as_str() {
+                "<" => i128::from(left < right),
+                "<=" => i128::from(left <= right),
+                ">" => i128::from(left > right),
+                _ => i128::from(left >= right),
+            };
         }
         Some(left)
     }
     fn parse_eq(toks: &[Tok], pos: &mut usize) -> Option<i128> {
         let mut left = parse_rel(toks, pos)?;
-        loop {
-            match bin(toks, pos, &["==", "!="]) {
-                Some(op) => {
-                    let right = parse_rel(toks, pos)?;
-                    left = i128::from(if op == "==" { left == right } else { left != right });
-                }
-                None => break,
-            }
+        while let Some(op) = bin(toks, pos, &["==", "!="]) {
+            let right = parse_rel(toks, pos)?;
+            left = i128::from(if op == "==" {
+                left == right
+            } else {
+                left != right
+            });
         }
         Some(left)
     }
@@ -395,7 +367,10 @@ pub fn normalize_args(args: &str, op: &str) -> Vec<String> {
     let trimmed = args.trim_matches(|c| c == '{' || c == '}' || c == ' ');
     let parts: Vec<String> = trimmed
         .split(',')
-        .map(|p| p.trim_matches(|c| c == '{' || c == '}' || c == ' ').to_string())
+        .map(|p| {
+            p.trim_matches(|c| c == '{' || c == '}' || c == ' ')
+                .to_string()
+        })
         .collect();
     let arg0 = parts.first().cloned().unwrap_or_default();
     let arg1 = parts.get(1).cloned().unwrap_or_default();
@@ -537,10 +512,24 @@ pub const INSTR_TABLE: &[InstrDesc] = &[
     d("fmv.d.x", InstrFmt::F2, 0x53, Some(0x0), Some(0b1111001)),
 ];
 
-const fn d(op: &'static str, fmt: InstrFmt, opcode: u32, f3: Option<u32>, f7: Option<u32>) -> InstrDesc {
-    InstrDesc { op, fmt, opcode, f3, f7 }
+const fn d(
+    op: &'static str,
+    fmt: InstrFmt,
+    opcode: u32,
+    f3: Option<u32>,
+    f7: Option<u32>,
+) -> InstrDesc {
+    InstrDesc {
+        op,
+        fmt,
+        opcode,
+        f3,
+        f7,
+    }
 }
 
 pub fn find_instr(op: &str) -> Option<&'static InstrDesc> {
-    INSTR_TABLE.iter().find(|dd| dd.op == op.to_ascii_lowercase())
+    INSTR_TABLE
+        .iter()
+        .find(|dd| dd.op == op.to_ascii_lowercase())
 }

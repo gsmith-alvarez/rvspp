@@ -8,13 +8,10 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 use rvs_app::{App, Modal, Mode, Pane};
-use rvs_machine::Machine;
 use rvs_app_cmds::AppCommands;
+use rvs_machine::Machine;
 use rvs_ui_modal::{centered_rect, draw_modal};
-use rvs_ui_panes::{
-    draw_exec, draw_inp, draw_listing, draw_mem, draw_out, draw_regs, draw_source,
-};
-
+use rvs_ui_panes::{draw_exec, draw_inp, draw_listing, draw_mem, draw_out, draw_regs, draw_source};
 
 pub struct LayoutAreas {
     pub top: Rect,
@@ -56,7 +53,6 @@ impl LayoutAreas {
     }
 }
 
-
 pub fn compute_layout(area: Rect) -> LayoutAreas {
     let vert_chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -73,10 +69,7 @@ pub fn compute_layout(area: Rect) -> LayoutAreas {
 
     let mid_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(48),
-            Constraint::Percentage(52),
-        ])
+        .constraints([Constraint::Percentage(48), Constraint::Percentage(52)])
         .split(middle);
 
     let upper_chunks = Layout::default()
@@ -163,33 +156,39 @@ fn draw_top_bar<M: Machine>(f: &mut Frame, app: &App<M>, area: Rect) {
         Mode::Input => "INPUT",
         Mode::Running => "RUNNING",
         Mode::Command => "COMMAND",
+        Mode::Search => "SEARCH",
     };
     let mode_style = match app.mode {
         Mode::Normal => rvs_theme::INFO,
         Mode::Edit => rvs_theme::OK,
         Mode::Input => rvs_theme::FOCUS,
         Mode::Running => rvs_theme::ERR,
-        Mode::Command => Style::default().fg(rvs_theme::MAUVE).add_modifier(Modifier::BOLD),
+        Mode::Command | Mode::Search => Style::default()
+            .fg(rvs_theme::MAUVE)
+            .add_modifier(Modifier::BOLD),
     };
 
     let title_span = Span::styled(
-        " RVS++ v1.0.0 ",
+        concat!(" RVS++ v", env!("CARGO_PKG_VERSION"), " "),
         rvs_theme::BADGE_INFO,
     );
     let fname_span = Span::styled(
         format!(" Fname: {fname}{modified} "),
         if app.editor.needs_save() {
-            Style::default().bg(rvs_theme::SURFACE0).fg(rvs_theme::YELLOW).add_modifier(Modifier::BOLD)
+            Style::default()
+                .bg(rvs_theme::SURFACE0)
+                .fg(rvs_theme::YELLOW)
+                .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().bg(rvs_theme::SURFACE0).fg(rvs_theme::TEXT).add_modifier(Modifier::BOLD)
+            Style::default()
+                .bg(rvs_theme::SURFACE0)
+                .fg(rvs_theme::TEXT)
+                .add_modifier(Modifier::BOLD)
         },
     );
     let mode_span = Span::styled(format!(" [{mode_str}] "), mode_style);
     let zoom_span = if let Some(pane) = app.zoomed_pane {
-        Span::styled(
-            format!(" [ZOOMED: {pane:?}] "),
-            rvs_theme::BADGE_ACCENT,
-        )
+        Span::styled(format!(" [ZOOMED: {pane:?}] "), rvs_theme::BADGE_ACCENT)
     } else {
         Span::raw("")
     };
@@ -198,19 +197,31 @@ fn draw_top_bar<M: Machine>(f: &mut Frame, app: &App<M>, area: Rect) {
         rvs_theme::MUTED,
     );
 
-    let line = Line::from(vec![title_span, fname_span, mode_span, zoom_span, hints_span]);
+    let line = Line::from(vec![
+        title_span, fname_span, mode_span, zoom_span, hints_span,
+    ]);
     f.render_widget(Paragraph::new(line), area);
 }
 
 fn draw_bottom_bar<M: Machine>(f: &mut Frame, app: &App<M>, area: Rect) {
     f.render_widget(Block::default().style(rvs_theme::BAR), area);
-    if app.mode == Mode::Command {
+    if app.mode == Mode::Command || app.mode == Mode::Search {
+        let (prefix, text) = if app.mode == Mode::Command {
+            (":", &app.command_input)
+        } else {
+            ("/", &app.search_input)
+        };
         let line = Line::from(vec![
-            Span::styled(":", rvs_theme::FOCUS),
-            Span::styled(&app.command_input, Style::default().fg(rvs_theme::TEXT).add_modifier(Modifier::BOLD)),
+            Span::styled(prefix, rvs_theme::FOCUS),
+            Span::styled(
+                text,
+                Style::default()
+                    .fg(rvs_theme::TEXT)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]);
         f.render_widget(Paragraph::new(line), area);
-        let cursor_col = area.x + 1 + app.command_input.chars().count() as u16;
+        let cursor_col = area.x + 1 + text.chars().count() as u16;
         if cursor_col < area.x + area.width {
             f.set_cursor_position((cursor_col, area.y));
         }
@@ -221,16 +232,21 @@ fn draw_bottom_bar<M: Machine>(f: &mut Frame, app: &App<M>, area: Rect) {
         } else {
             rvs_theme::OK_PLAIN
         };
-        f.render_widget(Paragraph::new(Span::styled(format!(" {}", app.status), style)), area);
+        f.render_widget(
+            Paragraph::new(Span::styled(format!(" {}", app.status), style)),
+            area,
+        );
     } else if let Some(pane) = app.zoomed_pane {
         let hint = Line::from(vec![
             Span::styled(format!(" [ZOOMED: {pane:?}] "), rvs_theme::BADGE_ACCENT),
-            Span::styled(" Press Enter, z, or Esc to restore 6-pane view", rvs_theme::MUTED),
+            Span::styled(
+                " Press Enter, z, or Esc to restore 6-pane view",
+                rvs_theme::MUTED,
+            ),
         ]);
         f.render_widget(Paragraph::new(hint), area);
     }
 }
-
 
 pub fn handle_click<M: Machine>(app: &mut App<M>, col: u16, row: u16) {
     if let Modal::FilePrompt(_) = app.modal {
@@ -245,8 +261,14 @@ pub fn handle_click<M: Machine>(app: &mut App<M>, col: u16, row: u16) {
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(42), Constraint::Percentage(58)])
                 .split(main_chunks[1]);
-            let list_inner = Block::default().borders(Borders::ALL).inner(split_chunks[0]);
-            if col >= list_inner.x && col < list_inner.x + list_inner.width && row >= list_inner.y && row < list_inner.y + list_inner.height {
+            let list_inner = Block::default()
+                .borders(Borders::ALL)
+                .inner(split_chunks[0]);
+            if col >= list_inner.x
+                && col < list_inner.x + list_inner.width
+                && row >= list_inner.y
+                && row < list_inner.y + list_inner.height
+            {
                 let clicked_row = (row - list_inner.y) as usize;
                 let clicked_idx = app.explorer.scroll_list + clicked_row;
                 if clicked_idx < app.explorer.entries.len() {
@@ -276,50 +298,50 @@ pub fn handle_click<M: Machine>(app: &mut App<M>, col: u16, row: u16) {
                 Pane::Listing => {
                     if rel_x < 10 {
                         app.reset_pc();
-                    } else if rel_x >= 31 && rel_x < 38 {
+                    } else if (31..38).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Listing, 1);
-                    } else if rel_x >= 38 && rel_x < 45 {
+                    } else if (38..45).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Listing, 2);
-                    } else if rel_x >= 45 && rel_x < 56 {
+                    } else if (45..56).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Listing, 3);
-                    } else if rel_x >= 56 && rel_x < 63 {
+                    } else if (56..63).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Listing, 4);
                     }
                 }
                 Pane::Regs => {
                     if rel_x < 7 {
                         app.toggle_pane_option(Pane::Regs, 1);
-                    } else if rel_x >= 7 && rel_x < 14 {
+                    } else if (7..14).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Regs, 2);
-                    } else if rel_x >= 14 && rel_x < 21 {
+                    } else if (14..21).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Regs, 3);
                     }
                 }
                 Pane::Mem => {
                     if rel_x < 7 {
                         app.toggle_pane_option(Pane::Mem, 1);
-                    } else if rel_x >= 7 && rel_x < 14 {
+                    } else if (7..14).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Mem, 2);
-                    } else if rel_x >= 14 && rel_x < 21 {
+                    } else if (14..21).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Mem, 3);
-                    } else if rel_x >= 21 && rel_x < 28 {
+                    } else if (21..28).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Mem, 4);
-                    } else if rel_x >= 28 && rel_x < 34 {
+                    } else if (28..34).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Mem, 5);
-                    } else if rel_x >= 34 && rel_x < 42 {
+                    } else if (34..42).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Mem, 6);
-                    } else if rel_x >= 42 && rel_x < 52 {
+                    } else if (42..52).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Mem, 7);
                     }
                 }
                 Pane::Exec => {
                     if rel_x < 9 {
                         app.clear_pane(Pane::Exec);
-                    } else if rel_x >= 9 && rel_x < 18 {
+                    } else if (9..18).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Exec, 1);
-                    } else if rel_x >= 18 && rel_x < 28 {
+                    } else if (18..28).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Exec, 2);
-                    } else if rel_x >= 28 && rel_x < 38 {
+                    } else if (28..38).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Exec, 3);
                     }
                 }
@@ -340,9 +362,9 @@ pub fn handle_click<M: Machine>(app: &mut App<M>, col: u16, row: u16) {
                 Pane::Source => {
                     if rel_x < 7 {
                         app.toggle_pane_option(Pane::Source, 1);
-                    } else if rel_x >= 7 && rel_x < 14 {
+                    } else if (7..14).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Source, 2);
-                    } else if rel_x >= 14 && rel_x < 28 {
+                    } else if (14..28).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Source, 3);
                     }
                 }
@@ -388,18 +410,16 @@ pub fn handle_scroll<M: Machine>(app: &mut App<M>, col: u16, row: u16, delta: i3
     }
 }
 
-
-    pub fn handle_mouse<M: Machine>(app: &mut App<M>, mouse: MouseEvent) {
-        match mouse.kind {
-            MouseEventKind::Down(MouseButton::Left) => {
-                handle_click(app, mouse.column, mouse.row);
-            }
-            MouseEventKind::ScrollUp => handle_scroll(app, mouse.column, mouse.row, -3),
-            MouseEventKind::ScrollDown => handle_scroll(app, mouse.column, mouse.row, 3),
-            _ => {}
+pub fn handle_mouse<M: Machine>(app: &mut App<M>, mouse: MouseEvent) {
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            handle_click(app, mouse.column, mouse.row);
         }
+        MouseEventKind::ScrollUp => handle_scroll(app, mouse.column, mouse.row, -3),
+        MouseEventKind::ScrollDown => handle_scroll(app, mouse.column, mouse.row, 3),
+        _ => {}
     }
-
+}
 
 #[cfg(test)]
 mod tests {

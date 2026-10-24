@@ -151,7 +151,11 @@ buf:    DM 4
     run(&mut sim, 1000);
 
     assert_eq!(sim.regs.read_x(2), 99);
-    assert_eq!(sim.regs.read_f64(1), 3.1415);
+    // The literal is pi-like on purpose (it exercises float parsing); clippy's
+    // approx-constant lint is noise here.
+    #[allow(clippy::approx_constant)]
+    let pi = 3.1415;
+    assert_eq!(sim.regs.read_f64(1), pi);
     assert_eq!(sim.regs.read_x(4), 0x1234);
     assert!(sim.output.contains("int: 99\n99\n"));
     assert!(sim.output.contains("3.1415\n"));
@@ -200,6 +204,6 @@ start:  # DMA output of integer 123
     // Submit DMA input
     submit_dma_input(&mut sim, "789").expect("submit");
     assert_eq!(sim.mem.read_bytes(0x18, 8).unwrap(), 789); // INPD holds 789
-    assert_eq!(sim.mem.read_bytes(0x10, 8).unwrap(), 0);   // INPC cleared to 0
+    assert_eq!(sim.mem.read_bytes(0x10, 8).unwrap(), 0); // INPC cleared to 0
     assert!(sim.output.contains("789\n"));
 }

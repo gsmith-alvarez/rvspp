@@ -4,12 +4,22 @@
 //! configuration, the RISC-V calling-convention checker, and the shared
 //! register/immediate argument accessors used by the executor crates.
 
-
 use std::collections::{BTreeMap, VecDeque};
 
 use rvs_memory::{Memory, SimError, SimResult};
-use rvs_tcl as tcl;
 use rvs_regs::{parse_reg, RegisterFile};
+use rvs_tcl as tcl;
+
+/// Which syscall convention `ecall` uses.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EcallAbi {
+    /// The course dialect: `ecall rd, rs1, imm` with immediates 0-9.
+    #[default]
+    Rvs,
+    /// Standard educational RISC-V: `a7` selects the call, `a0`/`a1` carry
+    /// arguments (the RARS/GNU set). Makes GNU-mode programs actually run.
+    A7,
+}
 
 /// View flags matching every checkbutton in `RVS046.tcl`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -157,8 +167,11 @@ impl ConventionChecker {
     ) -> Option<String> {
         let sp = regs.read_x(2);
         let mut warning = None;
-        if sp % 16 != 0 {
-            let msg = format!("Stack pointer sp is not 16-byte aligned at call 0x{:016x} (sp = 0x{:016x})", call_pc, sp);
+        if !sp.is_multiple_of(16) {
+            let msg = format!(
+                "Stack pointer sp is not 16-byte aligned at call 0x{:016x} (sp = 0x{:016x})",
+                call_pc, sp
+            );
             self.violations.push(msg.clone());
             warning = Some(msg);
         }
@@ -232,7 +245,6 @@ impl ConventionChecker {
     }
 }
 
-
 /// The complete simulator state, mirroring the Tcl globals.
 #[derive(Debug)]
 pub struct Simulator {
@@ -258,6 +270,11 @@ pub struct Simulator {
     pub pending: Option<PendingInput>,
     /// `::brk` run-interrupt flag.
     pub brk: bool,
+    /// Append a trace line per retired instruction. Off is a batch/`--no-trace`
+    /// optimisation only: the report is then empty in its `Run` section.
+    pub trace: bool,
+    /// First execution error of the current run (`None` after a clean halt).
+    pub last_error: Option<String>,
     /// Mapping from source line index (0-based) to instruction/data address.
     pub line_to_addr: BTreeMap<usize, u64>,
     /// Mapping from instruction/data address to source line index (0-based).
@@ -268,7 +285,19 @@ pub struct Simulator {
     pub convention: ConventionChecker,
     /// Assembly dialect mode (RVS or GNU).
     pub dialect: rvs_transpile::AssemblyDialect,
+    /// Syscall convention used by `ecall`.
+    pub ecall_abi: EcallAbi,
+    /// Next free address for `sbrk` (a7 ABI only).
+    pub heap_break: u64,
+    /// Set by an exit syscall; `step` reports it as a halt.
+    pub exit_requested: bool,
+    /// Exit status passed to the exit syscall, when any.
+    pub exit_code: i64,
 }
+
+/// First address handed out by `sbrk` in the a7 ABI (page-aligned, far away
+/// from the usual code/data/stack addresses).
+pub const HEAP_BASE: u64 = 0x1000_0000;
 
 impl Default for Simulator {
     fn default() -> Self {
@@ -286,11 +315,17 @@ impl Default for Simulator {
             entry_type: String::new(),
             pending: None,
             brk: false,
+            trace: true,
+            last_error: None,
             line_to_addr: BTreeMap::new(),
             addr_to_line: BTreeMap::new(),
             metrics: ExecutionMetrics::default(),
             convention: ConventionChecker::default(),
             dialect: rvs_transpile::AssemblyDialect::default(),
+            ecall_abi: EcallAbi::default(),
+            heap_break: HEAP_BASE,
+            exit_requested: false,
+            exit_code: 0,
         }
     }
 }
@@ -347,7 +382,8 @@ impl Simulator {
                     } else {
                         for (idx, &reg_val) in frame.saved_x.iter().enumerate() {
                             if val == reg_val && val != 0 {
-                                let abi = rvs_regs::abi_name(ConventionChecker::SAVED_X_INDICES[idx]);
+                                let abi =
+                                    rvs_regs::abi_name(ConventionChecker::SAVED_X_INDICES[idx]);
                                 annotation = format!("Saved {}", abi);
                                 break;
                             }
@@ -482,4 +518,3 @@ pub struct PendingInput {
     pub imm: u64,
     pub inst_pc: u64,
 }
-

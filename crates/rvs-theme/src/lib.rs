@@ -141,6 +141,41 @@ pub const COMMENT: Style = Style::new().fg(OVERLAY2).add_modifier(Modifier::ITAL
 /// String and character literals.
 pub const STRING: Style = Style::new().fg(PINK);
 
+// ---------------------------------------------------------------------------
+// View-model mapping
+// ---------------------------------------------------------------------------
+
+/// Map a neutral view [`rvs_machine::Tone`] to a concrete style.
+pub fn tone_style(tone: rvs_machine::Tone) -> Style {
+    use rvs_machine::Tone;
+    match tone {
+        Tone::Plain => TEXT_STYLE,
+        Tone::Secondary => SECONDARY,
+        Tone::Muted => MUTED,
+        Tone::Faint => FAINT,
+        Tone::Heading => HEADING,
+        Tone::Focus => FOCUS,
+        Tone::Info => INFO,
+        Tone::InfoPlain => INFO_PLAIN,
+        Tone::Ok => OK,
+        Tone::OkPlain => OK_PLAIN,
+        Tone::Warn => WARN,
+        Tone::WarnPlain => WARN_PLAIN,
+        Tone::Err => ERR,
+        Tone::ErrPlain => ERR_PLAIN,
+        Tone::Label => LABEL,
+        Tone::Op => OP,
+        Tone::Arg1 => ARG1,
+        Tone::Arg2 => ARG2,
+        Tone::Arg3 => ARG3,
+        Tone::Punct => PUNCT,
+        Tone::Comment => COMMENT,
+        Tone::String => STRING,
+        Tone::Pc => PC,
+        Tone::Strong => Style::new().fg(TEXT).add_modifier(Modifier::BOLD),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,40 +324,5 @@ mod tests {
                 "syntax colors collide under {kind:?}: ΔE {syntax_min:.1}"
             );
         }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// View-model mapping
-// ---------------------------------------------------------------------------
-
-/// Map a neutral view [`rvs_machine::Tone`] to a concrete style.
-pub fn tone_style(tone: rvs_machine::Tone) -> Style {
-    use rvs_machine::Tone;
-    match tone {
-        Tone::Plain => TEXT_STYLE,
-        Tone::Secondary => SECONDARY,
-        Tone::Muted => MUTED,
-        Tone::Faint => FAINT,
-        Tone::Heading => HEADING,
-        Tone::Focus => FOCUS,
-        Tone::Info => INFO,
-        Tone::InfoPlain => INFO_PLAIN,
-        Tone::Ok => OK,
-        Tone::OkPlain => OK_PLAIN,
-        Tone::Warn => WARN,
-        Tone::WarnPlain => WARN_PLAIN,
-        Tone::Err => ERR,
-        Tone::ErrPlain => ERR_PLAIN,
-        Tone::Label => LABEL,
-        Tone::Op => OP,
-        Tone::Arg1 => ARG1,
-        Tone::Arg2 => ARG2,
-        Tone::Arg3 => ARG3,
-        Tone::Punct => PUNCT,
-        Tone::Comment => COMMENT,
-        Tone::String => STRING,
-        Tone::Pc => PC,
-        Tone::Strong => Style::new().fg(TEXT).add_modifier(Modifier::BOLD),
     }
 }

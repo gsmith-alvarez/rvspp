@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: Format & lints
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: rustfmt
+        run: cargo fmt --all -- --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Linking check: every crate and binary must actually link, not just
+      # type-check. `--locked` also fails when Cargo.lock was not committed.
+      - name: Build & link
+        run: cargo build --workspace --release --locked
+      # Snapshot tests fail on a mismatch, so a changed frame must be committed
+      # deliberately (`INSTA_UPDATE=always`).
+      - name: Tests
+        run: cargo test --workspace --locked
+
+  parity:
+    name: Autograder parity (t1-t9 vs Tcl reference)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Tcl/Tk and a virtual display
+        run: sudo apt-get update && sudo apt-get install -y tcl tk xvfb
+      - name: Differential harness
+        run: bash tests/differential/run.sh

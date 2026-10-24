@@ -4,12 +4,13 @@
 
 > **Vibe-Ware Notice**: This project is **vibe-ware** — rapidly designed and iterated with AI-assisted engineering, refactored into a clean production Rust architecture, and verified for full behavioral and assembly parity against the original RVS reference simulator.
 
-[![Release](https://img.shields.io/badge/version-1.0.0-cyan.svg)](https://github.com/gsmith-alvarez/rvspp/releases)
+[![Release](https://img.shields.io/badge/version-1.1.0-cyan.svg)](https://github.com/gsmith-alvarez/rvspp/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-An interactive, fast terminal-based RISC-V simulator and debugger (RV64IMFD) written in pure Rust.
+An interactive terminal RISC-V simulator and debugger written in Rust, built as a drop-in replacement for the 2019 educational simulator `RVS046.tcl` used in university computer architecture courses: real Vim modal editing, reversible execution, live calling convention checking, call stack inspection, and no runtime dependencies (no Tcl, Tk, Java, X11 or browser).
 
-RVS++ takes the classic 2019 educational simulator (`RVS046.tcl`) used in university computer architecture courses and rebuilds it for modern development: real Vim modal editing, reversible execution, live calling convention checking, call stack inspection, and zero external dependencies.
+> **What this is:** a debugger for the *RVS course dialect* (RV64 integer + M + a subset of F/D), with byte-exact `kkbatch` report parity and a syntax-level GNU mode bolted on.
+> **What this is not:** a general RISC-V ISA simulator. No atomics, no compressed instructions, no executed CSRs, no traps/privilege/VM, no ELF or GCC output, one hart. See [Scope & Limitations](#scope--limitations).
 
 ![RVS++ main view: source editor, assembly listing, registers, memory, execution trace](docs/img/overview.png)
 
@@ -79,20 +80,22 @@ After using Nix to finally wrestle RVS onto my machine, I thought of all those v
 
 Like C++ to C, **RVS++** takes that familiar simulator and gives it a ground-up modernization:
 
-- **Runs everywhere instantly**: Single self-contained binary in pure Rust. No Tcl, no Tk, no X11 required. Runs natively on Linux, macOS, and Windows (WSL).
+- **Runs on a lab box or over SSH**: one Rust binary, no Tcl, Tk, X11, Java or browser. Builds and is tested on Linux and macOS; Windows is WSL only (the native Windows path is untested).
 - **Feels like a real editor**: Vim modal editing (`Normal`, `Insert`, `Command`), full motion keys (`h/j/k/l`, `w/b`, `0/$`, `gg/G`), `dd`/`yy`/`p`, multi-level undo/redo, `Ctrl+Backspace` / `Ctrl+W`, and an `$EDITOR` shortcut (`Enter`) to hand off to Neovim.
 - **Proper aligned tables**: Clean tabular views with vertical dividers and correlated bitfield-to-operand color coding (`[CLR]`), so you never have to fight horizontal scrollbars.
-- **Actual debugging tools**: Interactive breakpoints with line markers (`● `), reverse stepping (`p` to rewind time from a 128-state ring buffer), and adjustable run speeds (`1Hz` up to `Max`) with live multi-pane animation.
+- **Actual debugging tools**: Breakpoints with line markers (`● `), conditional breakpoints (`:b loop if s0 == 3`), watchpoints that stop the run when a cell changes, step over/out (`:next`, `:finish`), reverse stepping (`p` to rewind time from a 128-state history), and adjustable run speeds (`1Hz` up to `Max`) with live multi-pane animation.
+- **Reverse stepping that stays fast**: history snapshots are deltas (registers + a mark into a memory undo journal), not full state copies — 500k steps rewind in ~100 ms instead of degrading as the trace grows.
+- **Real GNU programs run**: with `--abi a7` (or `:abi a7`) `ecall` uses the RARS/GNU convention (`a7` selects the call, `a0`/`a1` carry arguments), so `li a7, 4; ecall` prints a string and `li a7, 10; ecall` exits.
 - **Catches assignment bugs early**: An automated calling convention linter (`:cc`) that alerts you if `$sp` isn't 16-byte aligned or if a function modifies callee-saved registers (`s0`–`s11`) without restoring them.
 - **Call stack visualizer**: Press `[STACK]` or run `:stack` to see your active call frames, stack memory slots, return addresses, and saved registers.
-- **GNU mode & two-way transpiler**: Write standard GNU assembly with directives and pseudo-instructions, or convert between GNU and canonical RVS dialect with one click (`[TRANSPILE]`) before submitting assignments.
-- **100% autograder compatible**: Headless batch mode (`--batch`) outputs byte-for-byte identical reports to the original `kkbatch` harness, guaranteeing your lab submissions pass grading.
+- **GNU mode & two-way transpiler**: Write GNU *syntax* — directives (`.word`, `.asciz`, `.zero`, …) and 25+ pseudo-instructions (`li`, `mv`, `call`, `j`, `ret`, …) — or convert between GNU and canonical RVS dialect with one click (`[TRANSPILE]`) before submitting assignments. This is a source-level dialect conversion, not a GNU toolchain: with the default `rvs` syscall ABI `ecall` keeps RVS semantics (`a7` is ignored; use `--abi a7` for the RARS/GNU convention), numeric branch operands are read as absolute targets, and there is no libc, linker, `.include` or macro support.
+- **Autograder parity**: Headless batch mode (`--batch`) reproduces the original `kkbatch` report byte-for-byte on the bundled conformance fixtures (t1–t5, t7–t9). t6 deliberately exercises instructions this rewrite adds and is smoke-tested only. Parity is verified by `tests/differential/run.sh`, which diffs against the Tcl reference.
 ---
 
 ## Quick Start
 
 ### 1. Requirements
-All you need is a standard Rust toolchain (Rust 1.75+):
+All you need is a standard Rust toolchain (1.80+ — the TUI uses `std::sync::LazyLock`):
 ```bash
 # If you don't have Rust installed:
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -162,7 +165,9 @@ nix develop
 | `c` | **Compile**: Assemble the current source buffer |
 | `s` | **START**: Reset PC to `START` address and begin running |
 | `n` | **Step**: Execute one instruction forward (or `:n <count>`) |
+| `:next` / `:finish` | **Step over** a call / **run out** of the current function |
 | `p` / `P` / `N` | **Step Back / Prev**: Rewind simulator by 1 instruction (128-state history) |
+| `/` then `Ctrl+N` / `Ctrl+P` | Search the source buffer, then repeat next / previous match |
 | `r` | **Run**: Execute continuously until `ebreak`, error, stop, or breakpoint |
 | `x` | **Stop**: Halt continuous execution |
 | `B` | **Breakpoint (Source)**: Toggle breakpoint on current cursor line (red `● `) |
@@ -227,7 +232,7 @@ Set breakpoints by line number, PC, symbol, or hex address:
 - Active breakpoints appear with a bold red `● ` marker in both the `Source` editor and `Listing` table. Continuous execution (`r`) pauses right before executing the breakpoint.
 
 ### 2. "Step Back" Reverse Execution (`Prev`)
-Made a wrong turn or stepped past the bug? Press `p`, `P`, or `N` to step backward. RVS++ continuously records a 128-state ring buffer snapshotting registers, memory, and logs, letting you cleanly rewind execution.
+Made a wrong turn or stepped past the bug? Press `p`, `P`, or `N` to step backward. RVS++ keeps the last 128 steps in a ring buffer; each entry records registers plus a mark into a memory undo journal, so rewinding a store removes it and replay lands on exactly the same state. Cost is independent of program size — 500k stepped instructions rewind in ~100 ms.
 
 ### 3. Calling Convention Linter (`:cc`)
 Designed specifically to prevent common student pitfalls in computer architecture labs:
@@ -257,6 +262,38 @@ Switch between strict educational syntax and standard GNU RISC-V assembly:
 
 ---
 
+## Scope & Limitations
+
+### Supported target
+- RV64I integer base, M multiply/divide (including the W forms), and the F/D subset the reference implements: `fld`/`fsd`, `fadd`/`fsub`/`fmul`/`fdiv`/`fsqrt.d`, `fsgnj*`, `fmin`/`fmax`, `feq`/`flt`/`fle`, `fcvt.l[u].d`, `fcvt.d.l[u]`, `fmv.x.d`/`fmv.d.x`. One hart.
+- Execution drives from the parsed instruction cell (mnemonic + operands). The 32-bit encoding in the listing is generated for display and is never decoded, so there is no fetched-instruction semantics.
+
+### Not implemented
+- **A** (atomics), **C** (compressed), **Zicsr** semantics (the mnemonics encode, the executor rejects them), `fence`/`fence.i` execution, traps, exceptions, privilege modes, paging, interrupts, timers.
+- In the `a7` ABI only the ten syscalls listed above exist; there is no heap allocator beyond `sbrk`, and `read string` requires a double-word-aligned buffer.
+- ELF loading, relocations, a linker, `.include`, macros, C/DWARF debugging, multi-file projects.
+- Architectural misalignment faults (the memory layer applies the reference's own alignment rules, nothing more).
+- Multiple harts, and I/O beyond the reference's two DMA control blocks plus `ecall`.
+
+### Deliberate dialect divergences (Tcl parity — do not "fix")
+- Branch operands are **absolute targets**, not PC-relative byte offsets; the encoded immediate is `(target − PC) / 2`.
+- Memory is a sparse map of 8-byte `DD` cells; code and data share one address space; loads/stores are byte-addressed inside a cell.
+- `ecall rd, rs1, imm` with immediates 0–9 is the entire syscall ABI; `a7` is never consulted.
+- Per-byte hex digit case is preserved, because the reference splices register strings into memory.
+- Consequence: assembly written for a real RISC-V toolchain will assemble and then behave differently. Use `:transpile` and label-based branches, or `--dialect gnu` with the caveats above.
+
+### Performance and state limits
+- Reverse stepping keeps 128 delta snapshots (a register copy plus a journal mark); the journal is trimmed as history rolls over, so cost stays flat (~5M steps/s) and memory is bounded by one window of history.
+- Batch mode carries no history. With the trace on it runs ≈0.8M instructions/s and the report grows with the instruction count (10M instructions ≈ 800 MB); use `--no-trace` (3 s, 6 KB) unless the trace itself is the artifact.
+
+### Crash safety
+- A panic anywhere in the simulator restores the terminal and writes the editor buffer to `$XDG_DATA_HOME/rvs/recovery-<timestamp>.s` (falling back to the temp dir) before exiting with status 1.
+
+### Status
+- v1.1.0, single maintainer. CI runs formatting, lints, tests (Linux/macOS), a release-mode link check and the Tcl parity harness; tagged releases publish prebuilt binaries. The crates are deliberately **not** published to crates.io — install with `cargo install --path crates/rvs-tui`, `cargo build --release`, or `nix run .`.
+
+---
+
 ## Colon Command Reference (`:`)
 
 Press `:` in Normal mode to enter Command mode:
@@ -276,7 +313,14 @@ Press `:` in Normal mode to enter Command mode:
 | `:stop` / `:halt` | Stop execution |
 | `:reset` / `:initpc` | Reset PC to `START` without running |
 | `:b [line\|addr\|pc]` | Toggle breakpoint (uses cursor line in Source, or specified target) |
-| `:cb` / `:clearbreaks` | Clear all breakpoints |
+| `:b <target> if <expr>` | Conditional breakpoint — fires only when the expression is non-zero |
+| `:cb` / `:clearbreaks` | Clear all breakpoints (and their conditions) |
+| `:next` / `:over` | Step over: run the call and stop after it returns |
+| `:finish` / `:out` | Run until the current function returns |
+| `:watch <sp\|addr\|label>` | Stop when that cell's value changes |
+| `:unwatch <target>` / `:cwatch` | Remove one watchpoint / clear all |
+| `:search <pattern>` | Same as `/` + Enter |
+| `:abi [rvs\|a7]` | Select the `ecall` convention |
 | `:speed <1\|5\|20\|max>` | Set execution speed preset |
 | `:mem <sp\|addr\|label>` | Jump memory view to stack pointer or address |
 | `:color [on\|off]` | Toggle bitfield-to-operand colorizer |
@@ -297,7 +341,8 @@ Press `:` in Normal mode to enter Command mode:
 In addition to the interactive TUI, `rvs` works as a headless CLI runner for grading scripts, autograders, and CI pipelines:
 
 ```bash
-rvs --batch <asm_file> <input_file> <output_file> [timeout_ms]
+rvs --batch [--dialect auto|rvs|gnu] [--abi rvs|a7] [--no-trace] [--json PATH] [--fail-on-error] \
+    [--timeout MS] <asm_file> <input_file> <output_file> [timeout_ms]
 ```
 
 ### Arguments
@@ -305,6 +350,13 @@ rvs --batch <asm_file> <input_file> <output_file> [timeout_ms]
 - `<input_file>`: File containing standard input lines for interactive `ECALL 5..9` or DMA requests (use `/dev/null` if none).
 - `<output_file>`: Where the evaluation report is written.
 - `[timeout_ms]`: Execution timeout in milliseconds (default: `3000` ms). Prevents runaway loops.
+- `--dialect`: `auto` (default) detects GNU files from their directives/pseudo-instructions; `rvs` forces the canonical dialect; `gnu` forces GNU mode. Batch mode used to be RVS-only, which made GNU files ungradeable.
+- `--abi`: `rvs` (default, parity) or `a7` (RARS/GNU syscalls: 1 print int, 4 print string, 5 read int, 8 read string, 9 sbrk, 10/17/93 exit, 11 print char, 34 print hex).
+- `--no-trace`: Omit the per-instruction trace. On a 10M-instruction loop this turns a 12 s / 800 MB report into 3 s / 6 KB — same execution, same final state.
+- `--json PATH`: Also write a machine-readable summary (status, steps, cycles, CPI, registers, memory, output) next to the report. The human report is unchanged, so parity is preserved.
+- `--fail-on-error`: Exit `2` when assembly or execution failed (default is `0`, like `kkbatch`, because a report is still written).
+
+Exit status is `0` when the report was written (a program that halts with an execution error still writes a report), `2` with `--fail-on-error`, and `1` on I/O or internal error.
 
 The output report structure matches the original `RVS046.tcl` batch output verbatim:
 1. `Load <asm_file>`: Verbatim source code.
@@ -319,10 +371,22 @@ The output report structure matches the original `RVS046.tcl` batch output verba
 
 ## Testing
 
-Run the full workspace test suite (59 unit, property and integration tests):
 ```bash
-cargo test --workspace
+cargo test --workspace          # 91 unit, property and integration tests
+cargo fmt --all -- --check      # formatting gate
+cargo clippy --workspace --all-targets -- -D warnings   # lint gate
+bash tests/differential/run.sh  # Tcl-reference parity gate (t1-t5, t7-t9 must diff clean)
 ```
+
+All of these run in CI on every pull request (plus a release-mode build that proves every crate and binary links, on Linux and macOS).
+
+What is covered:
+- Per-crate unit tests, plus `proptest` properties for the editor cursor and Tcl integer/hex round-trips.
+- `crates/rvs-assembler/tests/robustness.rs`: a corpus of malformed programs that must assemble-or-error without panicking, and the guarantees that an unencodable instruction is reported instead of executed.
+- `crates/rvs-transpile/tests/roundtrip.rs`: the transpiler is total on arbitrary text, preserves line count, and is idempotent.
+- 16 headless TUI tests (including an insta frame snapshot) and 5 full-ISA integration tests.
+
+Known gaps: no CI, no coverage tooling, and the differential harness writes fixed `/tmp/*.out` paths, so don't run two suites concurrently.
 
 ---
 

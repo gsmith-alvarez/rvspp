@@ -24,15 +24,15 @@ rvs-app-cmds = { path = "../rvs-app-cmds" }
 clap = { workspace = true }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
+dirs = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
 rvs-explorer = { path = "../rvs-explorer" }
 rvs-machine = { path = "../rvs-machine" }
 rvs-machine-riscv = { path = "../rvs-machine-riscv" }
+rvs-theme = { path = "../rvs-theme" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 signal-hook = { workspace = true }
-
-rvs-theme = { path = "../rvs-theme" }

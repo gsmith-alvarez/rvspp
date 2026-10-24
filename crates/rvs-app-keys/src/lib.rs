@@ -2,9 +2,9 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use rvs_machine::Machine;
 use rvs_app::{App, FileAction, Modal, Mode, Pane};
 use rvs_app_cmds::AppCommands;
+use rvs_machine::Machine;
 
 pub trait AppKeys {
     fn on_key(&mut self, key: KeyEvent);
@@ -13,6 +13,7 @@ pub trait AppKeys {
     fn editor_key(&mut self, key: KeyEvent);
     fn on_key_input(&mut self, key: KeyEvent);
     fn on_key_modal(&mut self, key: KeyEvent);
+    fn on_key_search(&mut self, key: KeyEvent);
 }
 
 impl<M: Machine> AppKeys for App<M> {
@@ -25,6 +26,10 @@ impl<M: Machine> AppKeys for App<M> {
         }
         if self.mode == Mode::Command {
             self.on_key_command(key);
+            return;
+        }
+        if self.mode == Mode::Search {
+            self.on_key_search(key);
             return;
         }
         if self.mode == Mode::Input {
@@ -99,7 +104,8 @@ impl<M: Machine> AppKeys for App<M> {
         }
 
         if self.mode == Mode::Normal || self.mode == Mode::Running {
-            let is_plain_or_shift = key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT;
+            let is_plain_or_shift =
+                key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT;
 
             // Enter key: user interjection primary behavior
             if key.code == KeyCode::Enter {
@@ -116,6 +122,12 @@ impl<M: Machine> AppKeys for App<M> {
                 return;
             }
 
+            // Normal mode '/' to search the source buffer
+            if is_plain_or_shift && key.code == KeyCode::Char('/') && self.focus == Pane::Source {
+                self.begin_search();
+                return;
+            }
+
             // Normal mode '?' to open Help/About
             if is_plain_or_shift && key.code == KeyCode::Char('?') {
                 self.pending_op = None;
@@ -124,7 +136,9 @@ impl<M: Machine> AppKeys for App<M> {
             }
 
             // Normal mode 'z' or 'Z' to toggle zoom
-            if is_plain_or_shift && (key.code == KeyCode::Char('z') || key.code == KeyCode::Char('Z')) {
+            if is_plain_or_shift
+                && (key.code == KeyCode::Char('z') || key.code == KeyCode::Char('Z'))
+            {
                 self.pending_op = None;
                 self.zoomed_pane = if self.zoomed_pane.is_some() {
                     None
@@ -158,6 +172,16 @@ impl<M: Machine> AppKeys for App<M> {
                     KeyCode::Char('r') if self.focus == Pane::Source => {
                         self.pending_op = None;
                         self.editor.redo();
+                        return;
+                    }
+                    KeyCode::Char('n') => {
+                        self.pending_op = None;
+                        self.search_repeat(true);
+                        return;
+                    }
+                    KeyCode::Char('p') => {
+                        self.pending_op = None;
+                        self.search_repeat(false);
                         return;
                     }
                     _ => {}
@@ -224,7 +248,9 @@ impl<M: Machine> AppKeys for App<M> {
                         }
                         return;
                     }
-                    KeyCode::Char('x') if self.focus != Pane::Source || self.mode == Mode::Running => {
+                    KeyCode::Char('x')
+                        if self.focus != Pane::Source || self.mode == Mode::Running =>
+                    {
                         self.pending_op = None;
                         self.action_stop();
                         return;
@@ -238,7 +264,9 @@ impl<M: Machine> AppKeys for App<M> {
                     self.on_normal_key_source(key);
                 }
                 Pane::Inp => {
-                    if is_plain_or_shift && (key.code == KeyCode::Char('i') || key.code == KeyCode::Char('a')) {
+                    if is_plain_or_shift
+                        && (key.code == KeyCode::Char('i') || key.code == KeyCode::Char('a'))
+                    {
                         self.mode = Mode::Input;
                     } else {
                         self.on_normal_key_other_pane(key, Pane::Inp);
@@ -254,6 +282,21 @@ impl<M: Machine> AppKeys for App<M> {
     fn on_normal_key_source(&mut self, key: KeyEvent) {
         let is_plain_or_shift = key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT;
         if is_plain_or_shift {
+            // Counts: `12j`, `3w`, `4x`. `0` extends a count, otherwise it is
+            // vim's "start of line".
+            if let KeyCode::Char(c @ '1'..='9') = key.code {
+                let digit = c.to_digit(10).unwrap_or(0) as usize;
+                self.pending_count = Some(self.pending_count.unwrap_or(0) * 10 + digit);
+                self.pending_op = None;
+                return;
+            }
+            if key.code == KeyCode::Char('0') && self.pending_count.is_some() {
+                let n = self.pending_count.unwrap_or(0);
+                self.pending_count = Some(n * 10);
+                self.pending_op = None;
+                return;
+            }
+            let count = self.pending_count.take().unwrap_or(1).max(1);
             match key.code {
                 KeyCode::Char('i') => {
                     self.pending_op = None;
@@ -294,19 +337,27 @@ impl<M: Machine> AppKeys for App<M> {
                 }
                 KeyCode::Char('h') | KeyCode::Left => {
                     self.pending_op = None;
-                    self.editor.move_left();
+                    for _ in 0..count {
+                        self.editor.move_left();
+                    }
                 }
                 KeyCode::Char('l') | KeyCode::Right => {
                     self.pending_op = None;
-                    self.editor.move_right();
+                    for _ in 0..count {
+                        self.editor.move_right();
+                    }
                 }
                 KeyCode::Char('j') | KeyCode::Down => {
                     self.pending_op = None;
-                    self.editor.move_down();
+                    for _ in 0..count {
+                        self.editor.move_down();
+                    }
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
                     self.pending_op = None;
-                    self.editor.move_up();
+                    for _ in 0..count {
+                        self.editor.move_up();
+                    }
                 }
                 KeyCode::Char('0') | KeyCode::Home => {
                     self.pending_op = None;
@@ -322,11 +373,15 @@ impl<M: Machine> AppKeys for App<M> {
                 }
                 KeyCode::Char('w') => {
                     self.pending_op = None;
-                    self.editor.move_word_forward();
+                    for _ in 0..count {
+                        self.editor.move_word_forward();
+                    }
                 }
                 KeyCode::Char('b') => {
                     self.pending_op = None;
-                    self.editor.move_word_backward();
+                    for _ in 0..count {
+                        self.editor.move_word_backward();
+                    }
                 }
                 KeyCode::Char('G') => {
                     self.pending_op = None;
@@ -345,7 +400,9 @@ impl<M: Machine> AppKeys for App<M> {
                 }
                 KeyCode::Char('x') => {
                     self.pending_op = None;
-                    self.editor.delete();
+                    for _ in 0..count {
+                        self.editor.delete();
+                    }
                 }
                 KeyCode::Char('d') => {
                     if self.pending_op == Some('d') {
@@ -525,7 +582,10 @@ impl<M: Machine> AppKeys for App<M> {
 
     fn on_key_modal(&mut self, key: KeyEvent) {
         match (&self.modal, key.code) {
-            (Modal::About | Modal::Stats | Modal::CallStack, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) => {
+            (
+                Modal::About | Modal::Stats | Modal::CallStack,
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q'),
+            ) => {
                 self.modal = Modal::None;
                 self.needs_full_clear = true;
             }
@@ -551,95 +611,110 @@ impl<M: Machine> AppKeys for App<M> {
                     }
                 }
             }
-            (Modal::FilePrompt(_), _) => {
-                match self.explorer.mode {
-                    rvs_explorer::ExplorerMode::Normal => {
-                        let is_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-                        let is_plain_or_shift = key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT;
-                        if is_ctrl {
-                            match key.code {
-                                KeyCode::Char('d') => self.explorer.page_down(10),
-                                KeyCode::Char('u') => self.explorer.page_up(10),
-                                _ => {}
-                            }
-                        } else if is_plain_or_shift {
-                            match key.code {
-                                KeyCode::Char('j') | KeyCode::Down => {
-                                    self.explorer.select_next();
-                                }
-                                KeyCode::Char('k') | KeyCode::Up => {
-                                    self.explorer.select_prev();
-                                }
-                                KeyCode::Char('h') | KeyCode::Left => {
-                                    if let Some(p) = self.explorer.parent_dir_input() {
-                                        self.modal_input = p;
-                                        self.explorer.update(&self.modal_input);
-                                    }
-                                }
-                                KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => {
-                                    self.explorer_open_selected();
-                                }
-                                KeyCode::Char('g') | KeyCode::Home => {
-                                    self.explorer.select_first();
-                                }
-                                KeyCode::Char('G') | KeyCode::End => {
-                                    self.explorer.select_last();
-                                }
-                                KeyCode::PageDown => self.explorer.page_down(10),
-                                KeyCode::PageUp => self.explorer.page_up(10),
-                                KeyCode::Char('J') => self.explorer.scroll_preview_down(3),
-                                KeyCode::Char('K') => self.explorer.scroll_preview_up(3),
-                                KeyCode::Char('/') | KeyCode::Char('i') | KeyCode::Char('a') => {
-                                    self.explorer.mode = rvs_explorer::ExplorerMode::Filter;
-                                }
-                                KeyCode::Char('q') | KeyCode::Esc => {
-                                    self.modal = Modal::None;
-                                    self.needs_full_clear = true;
-                                }
-                                KeyCode::Tab => {
-                                    if let Some(comp) = self.explorer.complete() {
-                                        self.modal_input = comp;
-                                        self.explorer.update(&self.modal_input);
-                                    }
-                                }
-                                KeyCode::BackTab => {
-                                    self.explorer.select_prev();
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    rvs_explorer::ExplorerMode::Filter => {
+            (Modal::FilePrompt(_), _) => match self.explorer.mode {
+                rvs_explorer::ExplorerMode::Normal => {
+                    let is_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+                    let is_plain_or_shift =
+                        key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT;
+                    if is_ctrl {
                         match key.code {
-                            KeyCode::Esc => {
-                                self.explorer.mode = rvs_explorer::ExplorerMode::Normal;
+                            KeyCode::Char('d') => self.explorer.page_down(10),
+                            KeyCode::Char('u') => self.explorer.page_up(10),
+                            _ => {}
+                        }
+                    } else if is_plain_or_shift {
+                        match key.code {
+                            KeyCode::Char('j') | KeyCode::Down => {
+                                self.explorer.select_next();
                             }
-                            KeyCode::Up => self.explorer.select_prev(),
-                            KeyCode::Down => self.explorer.select_next(),
-                            KeyCode::PageUp => self.explorer.page_up(10),
+                            KeyCode::Char('k') | KeyCode::Up => {
+                                self.explorer.select_prev();
+                            }
+                            KeyCode::Char('h') | KeyCode::Left => {
+                                if let Some(p) = self.explorer.parent_dir_input() {
+                                    self.modal_input = p;
+                                    self.explorer.update(&self.modal_input);
+                                }
+                            }
+                            KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => {
+                                self.explorer_open_selected();
+                            }
+                            KeyCode::Char('g') | KeyCode::Home => {
+                                self.explorer.select_first();
+                            }
+                            KeyCode::Char('G') | KeyCode::End => {
+                                self.explorer.select_last();
+                            }
                             KeyCode::PageDown => self.explorer.page_down(10),
+                            KeyCode::PageUp => self.explorer.page_up(10),
+                            KeyCode::Char('J') => self.explorer.scroll_preview_down(3),
+                            KeyCode::Char('K') => self.explorer.scroll_preview_up(3),
+                            KeyCode::Char('/') | KeyCode::Char('i') | KeyCode::Char('a') => {
+                                self.explorer.mode = rvs_explorer::ExplorerMode::Filter;
+                            }
+                            KeyCode::Char('q') | KeyCode::Esc => {
+                                self.modal = Modal::None;
+                                self.needs_full_clear = true;
+                            }
                             KeyCode::Tab => {
                                 if let Some(comp) = self.explorer.complete() {
                                     self.modal_input = comp;
                                     self.explorer.update(&self.modal_input);
                                 }
                             }
-                            KeyCode::BackTab => self.explorer.select_prev(),
-                            KeyCode::Enter => {
-                                self.explorer_open_selected();
-                            }
-                            KeyCode::Backspace => {
-                                self.modal_input.pop();
-                                self.explorer.update(&self.modal_input);
-                            }
-                            KeyCode::Char(c) => {
-                                self.modal_input.push(c);
-                                self.explorer.update(&self.modal_input);
+                            KeyCode::BackTab => {
+                                self.explorer.select_prev();
                             }
                             _ => {}
                         }
                     }
                 }
+                rvs_explorer::ExplorerMode::Filter => match key.code {
+                    KeyCode::Esc => {
+                        self.explorer.mode = rvs_explorer::ExplorerMode::Normal;
+                    }
+                    KeyCode::Up => self.explorer.select_prev(),
+                    KeyCode::Down => self.explorer.select_next(),
+                    KeyCode::PageUp => self.explorer.page_up(10),
+                    KeyCode::PageDown => self.explorer.page_down(10),
+                    KeyCode::Tab => {
+                        if let Some(comp) = self.explorer.complete() {
+                            self.modal_input = comp;
+                            self.explorer.update(&self.modal_input);
+                        }
+                    }
+                    KeyCode::BackTab => self.explorer.select_prev(),
+                    KeyCode::Enter => {
+                        self.explorer_open_selected();
+                    }
+                    KeyCode::Backspace => {
+                        self.modal_input.pop();
+                        self.explorer.update(&self.modal_input);
+                    }
+                    KeyCode::Char(c) => {
+                        self.modal_input.push(c);
+                        self.explorer.update(&self.modal_input);
+                    }
+                    _ => {}
+                },
+            },
+            _ => {}
+        }
+    }
+
+    /// The `/` prompt: type a pattern, Enter searches, Esc cancels.
+    fn on_key_search(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.mode = Mode::Normal;
+                self.search_input.clear();
+            }
+            KeyCode::Enter => self.commit_search(),
+            KeyCode::Backspace => {
+                self.search_input.pop();
+            }
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.search_input.push(c);
             }
             _ => {}
         }

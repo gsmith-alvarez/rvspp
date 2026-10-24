@@ -2,8 +2,7 @@
 
 use rvs_memory::{SimError, SimResult};
 use rvs_sim::{
-    imm_raw, read_reg_arg, reg_string_of, write_reg_arg, write_x, PendingInput,
-    Simulator,
+    imm_raw, read_reg_arg, reg_string_of, write_reg_arg, write_x, EcallAbi, PendingInput, Simulator,
 };
 use rvs_tcl as tcl;
 
@@ -44,8 +43,12 @@ fn pack_chars(s: &str) -> u64 {
     v
 }
 
-/// `ECALL`: syscalls 0-4 output, 5-9 input.
+/// `ECALL` dispatch. In the a7 ABI the operands are ignored, exactly like a
+/// normal RISC-V program expects.
 pub fn ecall(sim: &mut Simulator, args: &[String]) -> Result<bool, SimError> {
+    if sim.ecall_abi == EcallAbi::A7 {
+        return ecall_a7(sim);
+    }
     let rs1a = read_reg_arg(sim, &args[1])?;
     let imm = imm_raw(&args[2])?;
     if imm <= 4 {
@@ -94,8 +97,9 @@ pub fn ecall(sim: &mut Simulator, args: &[String]) -> Result<bool, SimError> {
                 write_x(sim, &args[0], tcl::low64(v), false)?;
             }
             6 => {
-                let f = parse_tcl_double(&line)
-                    .ok_or_else(|| SimError(format!("expected floating-point number but got \"{line}\"")))?;
+                let f = parse_tcl_double(&line).ok_or_else(|| {
+                    SimError(format!("expected floating-point number but got \"{line}\""))
+                })?;
                 write_reg_arg(sim, &args[0], f.to_bits(), false)?;
             }
             7 => {
@@ -117,6 +121,66 @@ pub fn ecall(sim: &mut Simulator, args: &[String]) -> Result<bool, SimError> {
     Ok(false)
 }
 
+/// Pop one line of batch input, or `""` when the machine is interactive.
+fn next_input_line(sim: &mut Simulator) -> String {
+    match &mut sim.input_lines {
+        Some(queue) => queue.pop_front().unwrap_or_default(),
+        None => String::new(),
+    }
+}
+
+/// RARS-compatible `a7` syscalls: 1 print int, 4 print string, 5 read int,
+/// 8 read string, 9 sbrk, 10/17/93 exit, 11 print char, 34 print hex.
+fn ecall_a7(sim: &mut Simulator) -> Result<bool, SimError> {
+    let a0 = sim.regs.read_x(10);
+    let a1 = sim.regs.read_x(11);
+    let a7 = sim.regs.read_x(17);
+    match a7 {
+        1 => sim.output.push_str(&format!("{}", a0 as i64)),
+        4 => {
+            let s = sim.mem.get_c_string(a0)?;
+            sim.output.push_str(&s);
+        }
+        5 => {
+            let line = next_input_line(sim);
+            let v = tcl::parse_int(line.trim())
+                .ok_or_else(|| SimError(format!("expected integer but got \"{}\"", line.trim())))?;
+            sim.regs.write_x(10, tcl::low64(v), false);
+        }
+        8 => {
+            let line = next_input_line(sim);
+            if !a0.is_multiple_of(8) {
+                return Err(SimError(
+                    "ERROR: read-string buffer must be double-word aligned".to_string(),
+                ));
+            }
+            let max = a1 as usize;
+            let mut text: String = line.chars().take(max.saturating_sub(1)).collect();
+            text.push('\0');
+            sim.mem.put_c_string(a0, &text)?;
+        }
+        9 => {
+            sim.regs.write_x(10, sim.heap_break, false);
+            sim.heap_break = sim.heap_break.wrapping_add(a0.max(8));
+        }
+        10 | 17 | 93 => {
+            sim.exit_requested = true;
+            sim.exit_code = a0 as i64;
+        }
+        11 => {
+            let c = char::from_u32((a0 & 0xff) as u32).unwrap_or('\0');
+            sim.output.push(c);
+        }
+        34 => sim.output.push_str(&format!("0x{a0:x}")),
+        other => {
+            return Err(SimError(format!(
+                "unknown syscall {other} (a7 ABI supports 1,4,5,8,9,10,11,17,34,93)"
+            )))
+        }
+    }
+    Ok(false)
+}
+
 /// One `Output` poll tick: serve the DMA OUT control/data registers.
 pub fn poll_dma_output(sim: &mut Simulator) {
     if !sim.view.dma_out || !sim.mem.is_dd(0) {
@@ -135,7 +199,9 @@ pub fn poll_dma_output(sim: &mut Simulator) {
         None => return, // Tcl's callback would error out silently
     };
     let res: String = if m01.contains('I') {
-        tcl::parse_int(&m11).map(|v| format!("{}", v as u64)).unwrap_or_default()
+        tcl::parse_int(&m11)
+            .map(|v| format!("{}", v as u64))
+            .unwrap_or_default()
     } else if m01.contains('F') {
         tcl::x2f(&m11)
             .map(tcl::tcl_double_to_string)
@@ -219,7 +285,7 @@ pub fn submit_dma_input(sim: &mut Simulator, line: &str) -> SimResult<()> {
             sim.mem.set_dd_value(0x18, f.to_bits(), 0);
         }
         "C" => {
-            sim.mem.set_dd_value(0x18, pack_chars(&line), 0);
+            sim.mem.set_dd_value(0x18, pack_chars(line), 0);
         }
         "S" => {
             let dest = tcl::parse_int(&m11).map(|v| v as u64).unwrap_or(0);
@@ -247,7 +313,7 @@ pub fn submit_ecall_input(sim: &mut Simulator, line: &str) -> SimResult<()> {
     };
     sim.output.push_str(line);
     sim.output.push('\n');
-    let args = vec![pending.rd_arg.clone(), pending.rs1_arg.clone()];
+    let args = [pending.rd_arg.clone(), pending.rs1_arg.clone()];
     match pending.imm {
         5 => {
             let v = tcl::parse_int(line)
@@ -255,8 +321,9 @@ pub fn submit_ecall_input(sim: &mut Simulator, line: &str) -> SimResult<()> {
             write_x(sim, &args[0], tcl::low64(v), false)?;
         }
         6 => {
-            let f = parse_tcl_double(line)
-                .ok_or_else(|| SimError(format!("expected floating-point number but got \"{line}\"")))?;
+            let f = parse_tcl_double(line).ok_or_else(|| {
+                SimError(format!("expected floating-point number but got \"{line}\""))
+            })?;
             write_reg_arg(sim, &args[0], f.to_bits(), false)?;
         }
         7 => {
@@ -264,7 +331,7 @@ pub fn submit_ecall_input(sim: &mut Simulator, line: &str) -> SimResult<()> {
             write_x(sim, &args[0], v, false)?;
         }
         8 => {
-            write_x(sim, &args[0], pack_chars(&line), false)?;
+            write_x(sim, &args[0], pack_chars(line), false)?;
         }
         9 => {
             let dest = read_reg_arg(sim, &args[0])?;
@@ -274,4 +341,3 @@ pub fn submit_ecall_input(sim: &mut Simulator, line: &str) -> SimResult<()> {
     }
     Ok(())
 }
-
