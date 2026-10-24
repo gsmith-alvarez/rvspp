@@ -1051,7 +1051,8 @@ fn draw_modal(f: &mut Frame, app: &mut App, area: Rect) {
 
             let text = vec![
                 Line::styled("RVS++ (RISC-V Visual Simulator++) v1.0.0 [Rust Rewrite]", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Line::raw("Reverse-engineered from RVS v0.46 (SIDIC, 2019) with modern Vim & Yazi workflows."),
+                Line::raw("Inspired by and reverse-engineered from RVS v0.46 (Copyright (c) 2019, SIDIC)."),
+                Line::raw("Preserves 100% computational and batch report parity with src/RVS046.tcl."),
                 Line::raw(""),
                 Line::styled("Navigation & Modal Editing:", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
                 Line::raw("  Tab / Shift+Tab   - Cycle focus between panes forward / backward"),

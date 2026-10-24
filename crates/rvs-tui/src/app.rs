@@ -1269,6 +1269,23 @@ impl App {
     }
 
     fn editor_key(&mut self, key: KeyEvent) {
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            match key.code {
+                KeyCode::Backspace | KeyCode::Char('w' | 'W' | '\u{8}') => {
+                    self.editor.delete_word_backward();
+                    return;
+                }
+                KeyCode::Char('z') => {
+                    self.editor.undo();
+                    return;
+                }
+                KeyCode::Char('y') => {
+                    self.editor.redo();
+                    return;
+                }
+                _ => {}
+            }
+        }
         match key.code {
             KeyCode::Enter => self.editor.newline(),
             KeyCode::Backspace => self.editor.backspace(),
@@ -1281,12 +1298,6 @@ impl App {
             KeyCode::End => self.editor.move_end(),
             KeyCode::PageUp => self.editor.page_up(20),
             KeyCode::PageDown => self.editor.page_down(20),
-            KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.editor.undo()
-            }
-            KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.editor.redo()
-            }
             _ => {}
         }
     }

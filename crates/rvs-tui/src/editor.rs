@@ -135,6 +135,31 @@ impl Editor {
         self.modified = true;
     }
 
+    pub fn delete_word_backward(&mut self) {
+        if self.col == 0 {
+            self.backspace();
+            return;
+        }
+        self.push_undo();
+        let line = &mut self.lines[self.row];
+        let chars: Vec<char> = line.chars().collect();
+        self.col = self.col.min(chars.len());
+        let mut new_col = self.col;
+        while new_col > 0 && chars.get(new_col - 1).map(|c| c.is_whitespace()).unwrap_or(false) {
+            new_col -= 1;
+        }
+        while new_col > 0 && chars.get(new_col - 1).map(|c| !c.is_whitespace()).unwrap_or(false) {
+            new_col -= 1;
+        }
+        let byte_start = line.char_indices().nth(new_col).map(|(b, _)| b).unwrap_or(line.len());
+        let byte_end = line.char_indices().nth(self.col).map(|(b, _)| b).unwrap_or(line.len());
+        if byte_start < byte_end {
+            line.replace_range(byte_start..byte_end, "");
+            self.col = new_col;
+            self.modified = true;
+        }
+    }
+
     pub fn delete(&mut self) {
         let line = &self.lines[self.row];
         let byte = line

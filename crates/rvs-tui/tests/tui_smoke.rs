@@ -865,6 +865,24 @@ helper:
 }
 
 #[test]
+fn test_editor_ctrl_backspace_and_word_deletion() {
+    let mut app = App::new(None);
+    app.mode = Mode::Edit;
+    app.editor.set_text("hello world   123");
+    app.editor.col = 17;
+
+    // 1. First Ctrl+Backspace deletes the word "123"
+    app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL));
+    assert_eq!(app.editor.lines[0], "hello world   ");
+    assert_eq!(app.editor.col, 14);
+
+    // 2. Second Ctrl+W deletes trailing spaces and preceding word "world"
+    app.on_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+    assert_eq!(app.editor.lines[0], "hello ");
+    assert_eq!(app.editor.col, 6);
+}
+
+#[test]
 fn test_call_stack_and_frame_visualizer() {
     let backend = TestBackend::new(140, 40);
     let mut terminal = Terminal::new(backend).unwrap();
