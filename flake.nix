@@ -1,5 +1,5 @@
 {
-  description = "RVS - RISC-V Visual Simulator";
+  description = "RVS++ - RISC-V Visual Simulator++";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

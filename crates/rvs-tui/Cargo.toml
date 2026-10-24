@@ -9,6 +9,9 @@ authors.workspace = true
 name = "rvs"
 path = "src/main.rs"
 
+[[bin]]
+name = "rvspp"
+path = "src/bin/rvspp.rs"
 [dependencies]
 rvs-core = { path = "../rvs-core" }
 clap = { workspace = true }

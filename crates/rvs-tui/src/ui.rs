@@ -169,7 +169,7 @@ fn draw_top_bar(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let title_span = Span::styled(
-        " RVS v0.5.0 ",
+        " RVS++ v1.0.0 ",
         Style::default().bg(Color::Cyan).fg(Color::Black).add_modifier(Modifier::BOLD),
     );
     let fname_span = Span::styled(
@@ -1050,7 +1050,7 @@ fn draw_modal(f: &mut Frame, app: &mut App, area: Rect) {
             f.render_widget(block, modal_area);
 
             let text = vec![
-                Line::styled("RVS (RISC-V Visual Simulator) v0.5.0 [Rust Rewrite]", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Line::styled("RVS++ (RISC-V Visual Simulator++) v1.0.0 [Rust Rewrite]", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
                 Line::raw("Reverse-engineered from RVS v0.46 (SIDIC, 2019) with modern Vim & Yazi workflows."),
                 Line::raw(""),
                 Line::styled("Navigation & Modal Editing:", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),

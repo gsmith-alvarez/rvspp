@@ -11,9 +11,9 @@ use std::process::ExitCode;
 
 use clap::Parser;
 
-/// RVS - RISC-V Visual Simulator (RV64IMFD), Rust rewrite of RVS046.
+/// RVS++ - RISC-V Visual Simulator++ (RV64IMFD), Rust rewrite of RVS046.
 #[derive(Parser, Debug)]
-#[command(name = "rvs", version = "0.5.0", about = "RVS - RISC-V Visual Simulator (RV64IMFD)")]
+#[command(name = "rvs++", version = "1.0.0", about = "RVS++ - RISC-V Visual Simulator++ (RV64IMFD)")]
 pub struct Cli {
     /// Positional args: [asm_file] or [asm_file in_file out_file [timeout_ms]]
     pub args: Vec<String>,

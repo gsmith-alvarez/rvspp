@@ -1,11 +1,11 @@
-# RVS Project Roadmap & Changelog
+# RVS++ Project Roadmap & Changelog
 
-This document provides a comprehensive technical overview of all completed development milestones, architectural enhancements, and long-term research horizons for **RVS (RISC-V Visual Simulator)**.
+This document provides a comprehensive technical overview of all completed development milestones, architectural enhancements, and long-term research horizons for **RVS++ (RISC-V Visual Simulator++) v1.0.0**.
 
 ---
 
 ## Project Vision & Architecture
-`rvs` is an ultra-fast, standalone RISC-V visual simulator and assembly debugger written in pure Rust (RV64IMFD). It modernizes and supersedes the legacy 2019 Tcl/Tk educational simulator (`RVS046.tcl`), preserving 100% computational and autograding parity while delivering:
+**RVS++** (`rvs++`) is an ultra-fast, standalone RISC-V visual simulator and assembly debugger written in pure Rust (RV64IMFD). It modernizes and supersedes the legacy 2019 Tcl/Tk educational simulator (`RVS046.tcl`), preserving 100% computational and autograding parity while delivering:
 - A responsive, zero-latency Terminal User Interface (TUI) powered by Ratatui.
 - Vim modal text editing with buffer undo/redo history.
 - Zero external C/X11/Tcl dependencies for effortless cross-platform deployment across Linux, macOS, and Windows (WSL).

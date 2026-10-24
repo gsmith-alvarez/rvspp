@@ -1,6 +1,6 @@
 # Implemented Features & Future Roadmap
 
-All major Tier 1, Tier 2, and previously deferred features have been implemented in `rvs` v0.5.0:
+All major Tier 1, Tier 2, and previously deferred features have been implemented in **RVS++ v1.0.0**:
 
 ## Completed Features
 - **Vim Modal Engine & TUI Navigation**: Normal, Insert (`i`/`a`/`o`), Command (`:`), Input, and Running modes with full keybindings, buffer undo/redo, and external `$EDITOR` support.

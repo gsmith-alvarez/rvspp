@@ -3,4 +3,6 @@ result
 result-*
 .direnv/
 rvs
+rvs++
+rvspp
 *.log

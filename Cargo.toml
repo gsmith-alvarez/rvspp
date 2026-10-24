@@ -6,10 +6,10 @@ members = [
 ]
 
 [workspace.package]
-version = "0.5.0"
+version = "1.0.0"
 edition = "2021"
 license = "MIT"
-authors = ["RVS Contributors"]
+authors = ["RVS++ Contributors"]
 
 [workspace.dependencies]
 thiserror = "2.0"

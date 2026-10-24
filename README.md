@@ -1,9 +1,27 @@
-# RVS — RISC-V Visual Simulator (RV64IMFD)
+# RVS++ — RISC-V Visual Simulator++ (RV64IMFD)
+
+[![Release](https://img.shields.io/badge/version-1.0.0-cyan.svg)](https://github.com/gsmith-alvarez/rvs/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Vibe-Ware](https://img.shields.io/badge/status-vibe--ware-magenta.svg)](#vibe-ware-notice)
 
 > **Vibe-Ware Notice**: This project is **vibe-ware** — rapidly designed and iterated with AI-assisted engineering, refactored into a clean production Rust architecture, and verified for full behavioral and assembly parity against the original RVS reference simulator.
 
-RVS is a terminal-based visual simulator and headless batch runner for the RISC-V **RV64IMFD** instruction set architecture. It features a responsive 6-pane terminal interface (powered by Ratatui and Crossterm) with Vim-style navigation, syntax highlighting, bitfield-to-operand colorization, and memory-mapped DMA I/O.
+**RVS++** is an ultra-fast, terminal-based visual simulator and headless batch runner for the RISC-V **RV64IMFD** instruction set architecture. It features a responsive multi-pane terminal interface (powered by Ratatui and Crossterm) with Vim modal editing, reversible execution, live hardware counters & CPI profiling, calling convention linting, call stack inspection, and a two-way GNU assembly transpiler.
 
+---
+
+## Why RVS++?
+
+In the storied tradition of C $\to$ C++, **RVS++** takes the classic, foundational 2019 educational RISC-V simulator (`RVS046.tcl` by SIDIC) and increments it with modern systems programming and developer tooling:
+
+- **`++ Performance`**: Pure, zero-copy, highly optimized Rust engine (RV64IMFD) with instantaneous $\le 1$ ms startup and clean process teardown.
+- **`++ Developer Experience`**: Full Vim modal editing engine (`Normal`, `Insert`, `Command`, `Input`), seamless `$EDITOR` (`nvim`) buffer hand-off, and buffer undo/redo trees.
+- **`++ Debugging Rigor`**: Source & Listing breakpoints (`● `), 128-state history ring buffer for reversible execution (`Prev`), and live execution animation speed throttling (`1Hz`–`Max`).
+- **`++ Architectural Profiling`**: Dynamic cycle-accurate models, live CPI metrics, branch prediction statistics, and memory access traffic breakdown (`:stats`).
+- **`++ University Coursework Compliance`**: Automated calling convention compliance linter enforcing 16-byte stack pointer alignment and callee-saved register preservation across function calls (`:cc`).
+- **`++ Call Stack Inspection`**: Interactive visual stack frame inspector mapping frame memory slots to return addresses, saved registers, and local arguments (`:stack`).
+- **`++ Dialect Versatility`**: Standard GNU assembly mode supporting directives and 25+ pseudo-instructions with a built-in two-way in-editor transpiler (`:transpile [gnu|rvs]`).
+- **`++ Zero Friction Portability`**: Zero external C/X11/Tcl dependencies. Compiles and runs out-of-the-box on Linux, macOS, and Windows WSL via Cargo or Nix Flakes.
 ---
 
 ## Prerequisites & Dependencies
