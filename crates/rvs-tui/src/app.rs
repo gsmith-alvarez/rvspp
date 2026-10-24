@@ -1810,8 +1810,26 @@ impl App {
                 self.needs_full_clear = true;
             }
             (Pane::Source, 1) => {
+                self.sim.dialect = rvs_core::transpiler::AssemblyDialect::Rvs;
+                self.status = "Assembly dialect: RVS".to_string();
+                self.needs_full_clear = true;
+            }
+            (Pane::Source, 2) => {
+                self.sim.dialect = rvs_core::transpiler::AssemblyDialect::Gnu;
+                self.status = "Assembly dialect: GNU".to_string();
+                self.needs_full_clear = true;
+            }
+            (Pane::Source, 3) => {
+                let is_cur_rvs = self.sim.dialect == rvs_core::transpiler::AssemblyDialect::Rvs;
+                let src = self.editor.text();
+                let transpiled = if is_cur_rvs {
+                    rvs_core::transpiler::transpile_rvs_to_gnu(&src)
+                } else {
+                    rvs_core::transpiler::transpile_gnu_to_rvs(&src)
+                };
+                self.editor.replace_text(&transpiled);
                 self.sim.dialect = self.sim.dialect.toggle();
-                self.status = format!("Assembly dialect: {}", self.sim.dialect.name());
+                self.status = format!("Transpiled buffer to {} and switched mode", self.sim.dialect.name());
                 self.needs_full_clear = true;
             }
             _ => {}

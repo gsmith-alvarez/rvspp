@@ -97,6 +97,8 @@ This document provides a comprehensive technical overview of all completed devel
 - **In-Editor Two-Way Transpiler (`:transpile [gnu|rvs]`)**:
   - `:transpile rvs`: Converts GNU assembly with pseudo-ops into strict, explicit 3-operand RVS dialect directly inside the editor buffer.
   - `:transpile gnu`: Compresses canonical 3-operand RVS code back into clean, idiomatic GNU assembly with standard pseudo-ops.
+- **Interactive Source Toolbar**:
+  - Interactive toggle buttons `[RVS]`, `[GNU]`, and `[TRANSPILE]` located in the `Source` bottom toolbar matching all other panes; keeps panel header title cleanly labeled `"Source"`.
 
 ### Phase 8: Call Stack & Stack Frame Memory Visualizer
 - **Interactive Stack Inspector (`:stack`, `[STACK]`)**:

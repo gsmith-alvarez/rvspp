@@ -356,20 +356,10 @@ pub(crate) fn visual_col_at(line: &str, char_col: usize, tab_width: usize) -> us
 
 
 fn draw_source(f: &mut Frame, app: &mut App, area: Rect) {
-    let active = app.focus == Pane::Source;
-    let is_zoomed = app.zoomed_pane == Some(Pane::Source);
-    let title = format!("Source [{}]", app.sim.dialect.name());
-    let block = pane_block(&title, active, is_zoomed);
-    let inner = block.inner(area);
-    f.render_widget(Clear, area);
-    f.render_widget(block, area);
-
-    if inner.height < 1 {
+    let Some((text_area, toolbar_area)) = render_pane_with_toolbar(f, app, Pane::Source, area) else {
         return;
-    }
-    f.render_widget(Clear, inner);
-
-    let text_area = inner;
+    };
+    let active = app.focus == Pane::Source;
     let height = text_area.height as usize;
     if app.editor.row < app.editor.offset_row {
         app.editor.offset_row = app.editor.row;
@@ -405,6 +395,15 @@ fn draw_source(f: &mut Frame, app: &mut App, area: Rect) {
     }
 
     f.render_widget(Paragraph::new(lines), text_area);
+
+    let is_rvs = app.sim.dialect == rvs_core::transpiler::AssemblyDialect::Rvs;
+    let is_gnu = app.sim.dialect == rvs_core::transpiler::AssemblyDialect::Gnu;
+    let toolbar = Line::from(vec![
+        pill("RVS", is_rvs),
+        pill("GNU", is_gnu),
+        btn("TRANSPILE"),
+    ]);
+    f.render_widget(Paragraph::new(toolbar), toolbar_area);
 
     if active && (app.mode == Mode::Edit || app.mode == Mode::Normal) && app.modal == Modal::None {
         let visual_col = if let Some(line) = app.editor.lines.get(app.editor.row) {
@@ -1620,7 +1619,15 @@ pub fn handle_click(app: &mut App, col: u16, row: u16) {
                         app.toggle_pane_option(Pane::Inp, 1);
                     }
                 }
-                Pane::Source => {}
+                Pane::Source => {
+                    if rel_x < 7 {
+                        app.toggle_pane_option(Pane::Source, 1);
+                    } else if rel_x >= 7 && rel_x < 14 {
+                        app.toggle_pane_option(Pane::Source, 2);
+                    } else if rel_x >= 14 && rel_x < 28 {
+                        app.toggle_pane_option(Pane::Source, 3);
+                    }
+                }
             }
         }
     }

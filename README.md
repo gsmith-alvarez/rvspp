@@ -208,7 +208,9 @@ cargo run --release
 
 ### Pane Toolbar & Shortcut Toggles
 - **`Source` Pane**:
-  - `Source [RVS]` / `Source [GNU]`: Assembly dialect indicator. Click or run `:mode` to toggle.
+  - `[RVS]`: Set assembly dialect to canonical RVS mode
+  - `[GNU]`: Set assembly dialect to standard GNU mode (supports directives and pseudo-instructions)
+  - `[TRANSPILE]`: In-editor two-way transpiler (translates buffer between GNU and RVS syntax and toggles mode)
 - **`Listing` Pane**:
   - `1`: Toggle TXT source column
   - `2`: Toggle Correlated `[CLR]` colorizer (maps bitfields to operands)

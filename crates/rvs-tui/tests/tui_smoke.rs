@@ -844,6 +844,24 @@ helper:
     app.command_input = ":tp gnu".to_string();
     app.execute_command();
     assert_eq!(app.editor.lines.len(), line_count_before, "Transpiler must not add extra newlines");
+
+    // 4. Test Source toolbar buttons: [RVS] (slot 1), [GNU] (slot 2), [TRANSPILE] (slot 3)
+    let backend = TestBackend::new(140, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+    let frame = terminal.backend().to_string();
+    assert!(frame.contains("[RVS]"));
+    assert!(frame.contains("[GNU]"));
+    assert!(frame.contains("[TRANSPILE]"));
+    assert!(!frame.contains("Source [RVS]"));
+    assert!(!frame.contains("Source [GNU]"));
+
+    app.toggle_pane_option(Pane::Source, 1);
+    assert_eq!(app.sim.dialect, rvs_core::transpiler::AssemblyDialect::Rvs);
+    app.toggle_pane_option(Pane::Source, 2);
+    assert_eq!(app.sim.dialect, rvs_core::transpiler::AssemblyDialect::Gnu);
+    app.toggle_pane_option(Pane::Source, 3);
+    assert_eq!(app.sim.dialect, rvs_core::transpiler::AssemblyDialect::Rvs);
 }
 
 #[test]
