@@ -8,7 +8,7 @@ Hard invariant: the batch report (`rvs --batch ...`) must remain **byte-for-byte
 
 ## Architecture & Data Flow
 
-The workspace is 21 small crates; each crate owns one concern and is a single `src/lib.rs` (except `rvs-tui`, which also has binaries).
+The workspace is 22 small crates; each crate owns one concern and is a single `src/lib.rs` (except `rvs-tui`, which also has binaries).
 
 ```text
 Engine (UI-independent):
@@ -24,6 +24,7 @@ Engine (UI-independent):
   rvs-format          -> sim, executor, assembler, ...   reports + batch runner
 
 TUI (depends on engine, never the reverse):
+  rvs-theme                              palette + semantic styles
   rvs-editor, rvs-explorer, rvs-syntax        UI leaves
   rvs-app             -> engine + editor/explorer
   rvs-app-cmds        -> app, explorer, tcl, shell-words, tempfile
@@ -54,7 +55,7 @@ TUI flow: `App` owns all UI state (`sim: Simulator`, `editor: Editor`, focus, mo
 
 ```bash
 cargo check --workspace                 # fast type check
-cargo test --workspace                  # full suite (59 tests)
+cargo test --workspace                  # full suite (63 tests)
 cargo clippy --workspace --all-targets  # default lints (no clippy.toml)
 cargo fmt --check                       # default rustfmt (no rustfmt.toml)
 
@@ -116,7 +117,7 @@ Patterns to follow:
 
 ## Testing & QA
 
-- **59 tests**: inline unit tests per crate, `proptest` properties (`rvs-editor` grapheme cursor, `rvs-tcl` integer/hex round-trips), 5 full-ISA integration tests, and 16 headless TUI tests (one of which is an insta frame snapshot).
+- **63 tests**: inline unit tests per crate, `proptest` properties (`rvs-editor` grapheme cursor, `rvs-tcl` integer/hex round-trips), 5 full-ISA integration tests, and 16 headless TUI tests (one of which is an insta frame snapshot).
 - **TUI tests** use `ratatui::backend::TestBackend`, `App::new(None)`, helpers `key`/`char_key`/`ctrl`/`type_str`, and assert on `app` state plus `terminal.backend().to_string()`. Render with `terminal.draw(|f| ui::draw(f, &mut app))`.
 - **Snapshot updates**: `INSTA_UPDATE=always cargo test -p rvs-tui --test tui_smoke test_initial_frame_snapshot`, then review `crates/rvs-tui/tests/snapshots/`.
 - **Parity gate**: after touching `rvs-tcl`, `rvs-asm-syntax`, `rvs-assembler`, `rvs-executor`, `rvs-fpu`, `rvs-ecall` or `rvs-format`, run `bash tests/differential/run.sh` (t1–t5, t7–t9 must diff clean; t6 is smoke-only).

@@ -1634,6 +1634,7 @@ dependencies = [
  "ratatui",
  "rvs-asm-syntax",
  "rvs-regs",
+ "rvs-theme",
 ]
 
 [[package]]
@@ -1641,6 +1642,13 @@ name = "rvs-tcl"
 version = "1.0.0"
 dependencies = [
  "proptest",
+]
+
+[[package]]
+name = "rvs-theme"
+version = "1.0.0"
+dependencies = [
+ "ratatui",
 ]
 
 [[package]]
@@ -1661,6 +1669,7 @@ dependencies = [
  "rvs-app-keys",
  "rvs-explorer",
  "rvs-format",
+ "rvs-theme",
  "rvs-transpile",
  "rvs-ui",
  "rvs-ui-panes",
@@ -1675,6 +1684,7 @@ dependencies = [
  "ratatui",
  "rvs-app",
  "rvs-app-cmds",
+ "rvs-theme",
  "rvs-ui-modal",
  "rvs-ui-panes",
 ]
@@ -1686,6 +1696,7 @@ dependencies = [
  "ratatui",
  "rvs-app",
  "rvs-explorer",
+ "rvs-theme",
  "rvs-ui-panes",
 ]
 
@@ -1701,6 +1712,7 @@ dependencies = [
  "rvs-memory",
  "rvs-syntax",
  "rvs-tcl",
+ "rvs-theme",
  "rvs-transpile",
  "unicode-segmentation",
  "unicode-width",

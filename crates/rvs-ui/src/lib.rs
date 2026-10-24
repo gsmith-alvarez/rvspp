@@ -2,9 +2,9 @@
 
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 use rvs_app::{App, Modal, Mode, Pane};
@@ -115,6 +115,8 @@ pub fn compute_layout(area: Rect) -> LayoutAreas {
 pub fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
     app.last_area = area;
+    // Paint the whole frame first so no widget leaks the terminal background.
+    f.render_widget(Block::default().style(rvs_theme::PANE), area);
     let l = compute_layout(area);
     draw_top_bar(f, app, l.top);
 
@@ -146,7 +148,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 }
 
 fn draw_top_bar(f: &mut Frame, app: &App, area: Rect) {
-    f.render_widget(Clear, area);
+    f.render_widget(Block::default().style(rvs_theme::BAR), area);
     let modified = if app.editor.needs_save() { "[*]" } else { "" };
     let fname = if app.fname.is_empty() {
         "<untitled>"
@@ -161,37 +163,37 @@ fn draw_top_bar(f: &mut Frame, app: &App, area: Rect) {
         Mode::Command => "COMMAND",
     };
     let mode_style = match app.mode {
-        Mode::Normal => Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        Mode::Edit => Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-        Mode::Input => Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-        Mode::Running => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-        Mode::Command => Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+        Mode::Normal => rvs_theme::INFO,
+        Mode::Edit => rvs_theme::OK,
+        Mode::Input => rvs_theme::FOCUS,
+        Mode::Running => rvs_theme::ERR,
+        Mode::Command => Style::default().fg(rvs_theme::MAUVE).add_modifier(Modifier::BOLD),
     };
 
     let title_span = Span::styled(
         " RVS++ v1.0.0 ",
-        Style::default().bg(Color::Cyan).fg(Color::Black).add_modifier(Modifier::BOLD),
+        rvs_theme::BADGE_INFO,
     );
     let fname_span = Span::styled(
         format!(" Fname: {fname}{modified} "),
         if app.editor.needs_save() {
-            Style::default().bg(Color::DarkGray).fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            Style::default().bg(rvs_theme::SURFACE0).fg(rvs_theme::YELLOW).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().bg(Color::DarkGray).fg(Color::White).add_modifier(Modifier::BOLD)
+            Style::default().bg(rvs_theme::SURFACE0).fg(rvs_theme::TEXT).add_modifier(Modifier::BOLD)
         },
     );
     let mode_span = Span::styled(format!(" [{mode_str}] "), mode_style);
     let zoom_span = if let Some(pane) = app.zoomed_pane {
         Span::styled(
             format!(" [ZOOMED: {pane:?}] "),
-            Style::default().bg(Color::Yellow).fg(Color::Black).add_modifier(Modifier::BOLD),
+            rvs_theme::BADGE_ACCENT,
         )
     } else {
         Span::raw("")
     };
     let hints_span = Span::styled(
         " ?:Help ^O:Load ^S:Save c:Compile s:START n:Next r:Run x:Stop Tab/S-Tab:Pane Enter/z:Zoom/Edit :Cmd q:Quit ",
-        Style::default().fg(Color::DarkGray),
+        rvs_theme::MUTED,
     );
 
     let line = Line::from(vec![title_span, fname_span, mode_span, zoom_span, hints_span]);
@@ -199,11 +201,11 @@ fn draw_top_bar(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_bottom_bar(f: &mut Frame, app: &App, area: Rect) {
-    f.render_widget(Clear, area);
+    f.render_widget(Block::default().style(rvs_theme::BAR), area);
     if app.mode == Mode::Command {
         let line = Line::from(vec![
-            Span::styled(":", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::styled(&app.command_input, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(":", rvs_theme::FOCUS),
+            Span::styled(&app.command_input, Style::default().fg(rvs_theme::TEXT).add_modifier(Modifier::BOLD)),
         ]);
         f.render_widget(Paragraph::new(line), area);
         let cursor_col = area.x + 1 + app.command_input.chars().count() as u16;
@@ -213,15 +215,15 @@ fn draw_bottom_bar(f: &mut Frame, app: &App, area: Rect) {
     } else if !app.status.is_empty() {
         let is_err = app.status.starts_with("ERROR");
         let style = if is_err {
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+            rvs_theme::ERR
         } else {
-            Style::default().fg(Color::Cyan)
+            rvs_theme::OK_PLAIN
         };
         f.render_widget(Paragraph::new(Span::styled(format!(" {}", app.status), style)), area);
     } else if let Some(pane) = app.zoomed_pane {
         let hint = Line::from(vec![
-            Span::styled(format!(" [ZOOMED: {pane:?}] "), Style::default().bg(Color::Yellow).fg(Color::Black).add_modifier(Modifier::BOLD)),
-            Span::styled(" Press Enter, z, or Esc to restore 6-pane view", Style::default().fg(Color::DarkGray)),
+            Span::styled(format!(" [ZOOMED: {pane:?}] "), rvs_theme::BADGE_ACCENT),
+            Span::styled(" Press Enter, z, or Esc to restore 6-pane view", rvs_theme::MUTED),
         ]);
         f.render_widget(Paragraph::new(hint), area);
     }

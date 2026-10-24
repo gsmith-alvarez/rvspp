@@ -15,6 +15,7 @@ members = [
   "crates/rvs-editor",
   "crates/rvs-explorer",
   "crates/rvs-syntax",
+  "crates/rvs-theme",
   "crates/rvs-app",
   "crates/rvs-app-keys",
   "crates/rvs-app-cmds",

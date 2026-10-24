@@ -12,3 +12,4 @@ rvs-ui-panes = { path = "../rvs-ui-panes" }
 rvs-ui-modal = { path = "../rvs-ui-modal" }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
+rvs-theme = { path = "../rvs-theme" }

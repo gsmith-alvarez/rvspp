@@ -4,17 +4,17 @@
 //! MUST preserve every character of `line` in the exact same order and character count
 //! (`spans.iter().map(|s| s.content.chars().count()).sum::<usize>() == line.chars().count()`).
 
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
 
-pub const STYLE_FMT: Style = Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD);
-pub const STYLE_OP: Style = Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD);
-pub const STYLE_ARG1: Style = Style::new().fg(Color::LightBlue).add_modifier(Modifier::BOLD);
-pub const STYLE_ARG2: Style = Style::new().fg(Color::LightMagenta).add_modifier(Modifier::BOLD);
-pub const STYLE_ARG3_IMM: Style = Style::new().fg(Color::LightGreen).add_modifier(Modifier::BOLD);
-pub const STYLE_PUNCT: Style = Style::new().fg(Color::DarkGray);
-pub const STYLE_COMMENT: Style = Style::new().fg(Color::DarkGray).add_modifier(Modifier::ITALIC);
-pub const STYLE_LABEL: Style = Style::new().fg(Color::LightMagenta).add_modifier(Modifier::BOLD);
+pub const STYLE_FMT: Style = rvs_theme::HEADING;
+pub const STYLE_OP: Style = rvs_theme::OP;
+pub const STYLE_ARG1: Style = rvs_theme::ARG1;
+pub const STYLE_ARG2: Style = rvs_theme::ARG2;
+pub const STYLE_ARG3_IMM: Style = rvs_theme::ARG3;
+pub const STYLE_PUNCT: Style = rvs_theme::PUNCT;
+pub const STYLE_COMMENT: Style = rvs_theme::COMMENT;
+pub const STYLE_LABEL: Style = rvs_theme::LABEL;
 
 pub fn is_zero_hex(hex: &str) -> bool {
     let t = hex.trim();
@@ -33,9 +33,8 @@ fn split_leading_opcode(text: &str) -> (&str, &str, &str) {
 }
 
 /// Highlight formatted instruction text (e.g. `addi    x1 x0 0x005` or `addi    x1,x0,5`).
-/// First word = opcode in bold `Color::Cyan`, registers in `Color::LightBlue` (or `Color::Blue` for zero),
-/// immediates/hex in `Color::LightGreen`, punctuation in `Color::DarkGray`,
-/// preserving exact character length of `text`.
+/// First word = opcode (`rvs_theme::OP`), registers (`rvs_theme::ARG2`, or `LABEL` for zero),
+/// immediates/hex (`ARG3`), punctuation (`PUNCT`), preserving exact character length of `text`.
 pub fn highlight_inst_operands(text: &str) -> Vec<Span<'static>> {
     if text.is_empty() {
         return Vec::new();
@@ -151,7 +150,7 @@ fn highlight_code_line(code: &str, mode: HighlightMode) -> Vec<Span<'static>> {
             STYLE_OP
         } else {
             match mode {
-                HighlightMode::Standard => Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                HighlightMode::Standard => Style::default().fg(rvs_theme::TEXT).add_modifier(Modifier::BOLD),
                 HighlightMode::Correlated(_) => STYLE_OP,
             }
         };
@@ -179,7 +178,7 @@ pub fn highlight_source_line(line: &str) -> Vec<Span<'static>> {
     if line.contains("ERROR:") {
         return vec![Span::styled(
             line.to_string(),
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            rvs_theme::ERR,
         )];
     }
     let (code, comment) = split_code_and_comment(line);
@@ -223,7 +222,7 @@ fn highlight_operands_str(text: &str) -> Vec<Span<'static>> {
             if !closed {
                 end = rest.len();
             }
-            spans.push(Span::styled(rest[..end].to_string(), Style::default().fg(Color::LightYellow)));
+            spans.push(Span::styled(rest[..end].to_string(), rvs_theme::STRING));
             rest = &rest[end..];
             continue;
         }
@@ -245,7 +244,7 @@ fn highlight_operands_str(text: &str) -> Vec<Span<'static>> {
             if !closed {
                 end = rest.len();
             }
-            spans.push(Span::styled(rest[..end].to_string(), Style::default().fg(Color::LightYellow)));
+            spans.push(Span::styled(rest[..end].to_string(), rvs_theme::STRING));
             rest = &rest[end..];
             continue;
         }
@@ -271,7 +270,7 @@ fn highlight_operands_str(text: &str) -> Vec<Span<'static>> {
                 .find(|ch: char| !is_ident_char(ch))
                 .map(|idx| c_len + idx)
                 .unwrap_or(rest.len());
-            spans.push(Span::styled(rest[..num_len].to_string(), Style::default().fg(Color::LightGreen)));
+            spans.push(Span::styled(rest[..num_len].to_string(), rvs_theme::ARG3));
             rest = &rest[num_len..];
             continue;
         }
@@ -293,16 +292,16 @@ fn highlight_operands_str(text: &str) -> Vec<Span<'static>> {
             if is_register(tok) {
                 let lower = tok.to_ascii_lowercase();
                 let style = if lower == "x0" || lower == "zero" {
-                    Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)
+                    rvs_theme::LABEL
                 } else {
-                    Style::default().fg(Color::LightBlue)
+                    rvs_theme::ARG2
                 };
                 spans.push(Span::styled(tok.to_string(), style));
             } else if is_numeric(tok) {
-                spans.push(Span::styled(tok.to_string(), Style::default().fg(Color::LightGreen)));
+                spans.push(Span::styled(tok.to_string(), rvs_theme::ARG3));
             } else {
                 // Label reference or symbol name
-                spans.push(Span::styled(tok.to_string(), Style::default().fg(Color::LightMagenta)));
+                spans.push(Span::styled(tok.to_string(), rvs_theme::LABEL));
             }
             rest = &rest[tok_len..];
             continue;
@@ -416,7 +415,7 @@ pub fn highlight_bin_correlated(bin_padded: &str) -> Vec<Span<'static>> {
     if bin_padded.contains("ERROR") {
         return vec![Span::styled(
             bin_padded.to_string(),
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            rvs_theme::ERR,
         )];
     }
 
@@ -504,7 +503,7 @@ pub fn highlight_operands_correlated(text: &str, fmt: Option<&str>) -> Vec<Span<
     if text.contains("ERROR") {
         return vec![Span::styled(
             text.to_string(),
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            rvs_theme::ERR,
         )];
     }
     let (ws, op, rest) = split_leading_opcode(text);
@@ -598,7 +597,7 @@ pub fn highlight_source_line_correlated(line: &str, fmt: Option<&str>) -> Vec<Sp
     if line.contains("ERROR:") {
         return vec![Span::styled(
             line.to_string(),
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            rvs_theme::ERR,
         )];
     }
     let (code, comment) = split_code_and_comment(line);

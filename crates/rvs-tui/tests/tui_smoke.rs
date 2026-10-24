@@ -1,6 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
-use ratatui::style::Color;
 use ratatui::Terminal;
 use rvs_app::{App, ConfirmAction, FileAction, Modal, Mode, Pane};
 use rvs_app_cmds::AppCommands as _;
@@ -610,11 +609,11 @@ fn test_listing_correlated_colorizing_and_toggle() {
         })
         .expect("Should find addi row in Listing buffer");
 
-    let fgs: Vec<Color> = (0..buffer.area.width).map(|x| buffer[(x, y)].fg).collect();
-    assert!(fgs.contains(&Color::Cyan), "Opcode/funct should be Cyan");
-    assert!(fgs.contains(&Color::LightBlue), "rd should be LightBlue");
-    assert!(fgs.contains(&Color::LightMagenta), "rs1 should be LightMagenta");
-    assert!(fgs.contains(&Color::LightGreen), "imm should be LightGreen");
+    let fgs: Vec<ratatui::style::Color> = (0..buffer.area.width).map(|x| buffer[(x, y)].fg).collect();
+    assert!(fgs.contains(&rvs_theme::SAPPHIRE), "Opcode/funct should be SAPPHIRE");
+    assert!(fgs.contains(&rvs_theme::TEAL), "rd should be TEAL");
+    assert!(fgs.contains(&rvs_theme::MAUVE), "rs1 should be MAUVE");
+    assert!(fgs.contains(&rvs_theme::PEACH), "imm should be PEACH");
 
     // 2. Toggle colorize OFF via key '2' on Listing pane
     app.on_key(char_key('2'));
@@ -624,9 +623,10 @@ fn test_listing_correlated_colorizing_and_toggle() {
     let buf_off = terminal.backend().buffer().clone();
     for x in 22..(buf_off.area.width - 2) {
         let fg = buf_off[(x, y)].fg;
-        assert_ne!(fg, Color::LightBlue);
-        assert_ne!(fg, Color::LightMagenta);
-        assert_ne!(fg, Color::LightGreen);
+        assert_ne!(fg, rvs_theme::SAPPHIRE);
+        assert_ne!(fg, rvs_theme::TEAL);
+        assert_ne!(fg, rvs_theme::MAUVE);
+        assert_ne!(fg, rvs_theme::PEACH);
     }
 
     // 3. Command toggles :color on / off / toggle

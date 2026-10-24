@@ -1,7 +1,6 @@
 //! Pane renderers for the RVS++ TUI.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::Frame;
@@ -12,9 +11,9 @@ use rvs_app::{App, Modal, Mode, Pane};
 
 pub fn pane_block<'a>(title: &'a str, active: bool, zoomed: bool) -> Block<'a> {
     let border_style = if active {
-        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        rvs_theme::FOCUS
     } else {
-        Style::default().fg(Color::DarkGray)
+        rvs_theme::FAINT
     };
     let title_str = if zoomed {
         format!(" [ZOOMED] {title} ")
@@ -25,10 +24,11 @@ pub fn pane_block<'a>(title: &'a str, active: bool, zoomed: bool) -> Block<'a> {
         .borders(Borders::ALL)
         .border_type(if active { BorderType::Double } else { BorderType::Plain })
         .border_style(border_style)
+        .style(rvs_theme::PANE)
         .title(Span::styled(title_str, if active {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            rvs_theme::FOCUS
         } else {
-            Style::default().fg(Color::White)
+            rvs_theme::TEXT_STYLE
         }))
 }
 
@@ -36,12 +36,12 @@ pub fn pill<'a>(label: &'a str, on: bool) -> Span<'a> {
     if on {
         Span::styled(
             format!(" [{label}] "),
-            Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD),
+            rvs_theme::BADGE_ON,
         )
     } else {
         Span::styled(
             format!(" [{label}] "),
-            Style::default().fg(Color::DarkGray),
+            rvs_theme::MUTED,
         )
     }
 }
@@ -49,7 +49,7 @@ pub fn pill<'a>(label: &'a str, on: bool) -> Span<'a> {
 pub fn btn<'a>(label: &'a str) -> Span<'a> {
     Span::styled(
         format!(" [{label}] "),
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        rvs_theme::INFO,
     )
 }
 fn build_table_header(cols: &[(&str, usize)]) -> (Line<'static>, Line<'static>) {
@@ -57,7 +57,7 @@ fn build_table_header(cols: &[(&str, usize)]) -> (Line<'static>, Line<'static>) 
     let mut div_str = String::new();
     for (i, &(title, width)) in cols.iter().enumerate() {
         if i > 0 {
-            hdr_spans.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
+            hdr_spans.push(Span::styled(" │ ", rvs_theme::FAINT));
             div_str.push_str("─┼─");
         }
         let text = if width > 0 {
@@ -67,12 +67,12 @@ fn build_table_header(cols: &[(&str, usize)]) -> (Line<'static>, Line<'static>) 
         };
         hdr_spans.push(Span::styled(
             text,
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            rvs_theme::HEADING,
         ));
         let div_width = if width > 0 { width } else { title.len().max(16) };
         div_str.push_str(&"─".repeat(div_width));
     }
-    (Line::from(hdr_spans), Line::styled(div_str, Style::default().fg(Color::DarkGray)))
+    (Line::from(hdr_spans), Line::styled(div_str, rvs_theme::FAINT))
 }
 
 pub fn expand_tabs(s: &str, tab_width: usize) -> String {
@@ -139,17 +139,17 @@ pub fn draw_source(f: &mut Frame, app: &mut App, area: Rect) {
         let is_cur = idx == app.editor.row && active;
         let has_bp = app.has_breakpoint_on_line(idx);
         let bp_mark = if has_bp {
-            Span::styled("● ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+            Span::styled("● ", rvs_theme::ERR)
         } else {
             Span::raw("  ")
         };
         let num_str = format!("{line:>width$} ", line = idx + 1, width = num_digits);
         let num_style = if has_bp {
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+            rvs_theme::ERR
         } else if is_cur {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            rvs_theme::FOCUS
         } else {
-            Style::default().fg(Color::DarkGray)
+            rvs_theme::MUTED
         };
 
         let expanded = expand_tabs(line_str, 8);
@@ -198,7 +198,7 @@ pub fn draw_listing(f: &mut Frame, app: &mut App, area: Rect) {
             if clean_line.contains("ERROR:") {
                 all_rows.push(Line::styled(
                     clean_line,
-                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                    rvs_theme::ERR,
                 ));
             } else {
                 let spans = rvs_syntax::highlight_source_line(&clean_line);
@@ -208,7 +208,7 @@ pub fn draw_listing(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         all_rows.push(Line::styled(
             "ASSEMBLY LISTING",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            rvs_theme::HEADING,
         ));
 
         let mut cols = vec![("  ADDRESS", 20)];
@@ -229,22 +229,22 @@ pub fn draw_listing(f: &mut Frame, app: &mut App, area: Rect) {
         all_rows.push(div_line);
 
         let clr = app.colorize_listing;
-        let sep = || Span::styled(" │ ", Style::default().fg(Color::DarkGray));
+        let sep = || Span::styled(" │ ", rvs_theme::FAINT);
 
         for (&addr, cell) in app.sim.mem.cells.iter() {
             let is_pc = addr == app.sim.regs.pc;
             let has_bp = app.breakpoints.contains(&addr);
             let bp_span = if has_bp {
-                Span::styled("● ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+                Span::styled("● ", rvs_theme::ERR)
             } else {
                 Span::raw("  ")
             };
             let addr_style = if is_pc {
-                Style::default().bg(Color::Cyan).fg(Color::Black).add_modifier(Modifier::BOLD)
+                rvs_theme::PC
             } else if has_bp {
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+                rvs_theme::ERR
             } else {
-                Style::default().fg(Color::Cyan)
+                rvs_theme::INFO_PLAIN
             };
             let mut row_spans = vec![bp_span, Span::styled(format!("0x{addr:016x}"), addr_style)];
 
@@ -256,20 +256,20 @@ pub fn draw_listing(f: &mut Frame, app: &mut App, area: Rect) {
                         row_spans.push(sep());
                         let is_err = val_str.contains("ERROR");
                         if clr {
-                            row_spans.push(Span::styled("DD ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)));
+                            row_spans.push(Span::styled("DD ", rvs_theme::HEADING));
                             let val_style = if is_err {
-                                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+                                rvs_theme::ERR
                             } else {
-                                Style::default().fg(Color::LightGreen)
+                                rvs_theme::OK_PLAIN
                             };
                             row_spans.push(Span::styled(format!("{:<37}", val_str), val_style));
                         } else {
                             let val_style = if is_err {
-                                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+                                rvs_theme::ERR
                             } else {
-                                Style::default().fg(Color::Gray)
+                                rvs_theme::SECONDARY
                             };
-                            row_spans.push(Span::styled("DD ", Style::default().fg(Color::Gray)));
+                            row_spans.push(Span::styled("DD ", rvs_theme::SECONDARY));
                             row_spans.push(Span::styled(format!("{:<37}", val_str), val_style));
                         }
                     }
@@ -289,9 +289,9 @@ pub fn draw_listing(f: &mut Frame, app: &mut App, area: Rect) {
                         } else {
                             let is_err = expanded.contains("ERROR");
                             let txt_style = if is_err {
-                                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+                                rvs_theme::ERR
                             } else {
-                                Style::default().fg(Color::Gray)
+                                rvs_theme::SECONDARY
                             };
                             row_spans.push(Span::styled(expanded, txt_style));
                         }
@@ -308,9 +308,9 @@ pub fn draw_listing(f: &mut Frame, app: &mut App, area: Rect) {
                         } else {
                             let is_err = bin_padded.contains("ERROR");
                             let bin_style = if is_err {
-                                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+                                rvs_theme::ERR
                             } else {
-                                Style::default().fg(Color::Gray)
+                                rvs_theme::SECONDARY
                             };
                             row_spans.push(Span::styled(bin_padded, bin_style));
                         }
@@ -323,7 +323,7 @@ pub fn draw_listing(f: &mut Frame, app: &mut App, area: Rect) {
                         if clr {
                             row_spans.extend(rvs_syntax::highlight_operands_correlated(&hex_ops, fmt_tag));
                         } else {
-                            row_spans.push(Span::styled(hex_ops, Style::default().fg(Color::Gray)));
+                            row_spans.push(Span::styled(hex_ops, rvs_theme::SECONDARY));
                         }
                     }
                     if app.sim.view.list_int {
@@ -335,7 +335,7 @@ pub fn draw_listing(f: &mut Frame, app: &mut App, area: Rect) {
                         if clr {
                             row_spans.extend(rvs_syntax::highlight_operands_correlated(&int_ops, fmt_tag));
                         } else {
-                            row_spans.push(Span::styled(int_ops, Style::default().fg(Color::Gray)));
+                            row_spans.push(Span::styled(int_ops, rvs_theme::SECONDARY));
                         }
                     }
                     if app.sim.view.list_txt {
@@ -346,9 +346,9 @@ pub fn draw_listing(f: &mut Frame, app: &mut App, area: Rect) {
                         } else {
                             let is_err = expanded.contains("ERROR");
                             let txt_style = if is_err {
-                                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+                                rvs_theme::ERR
                             } else {
-                                Style::default().fg(Color::Gray)
+                                rvs_theme::SECONDARY
                             };
                             row_spans.push(Span::styled(expanded, txt_style));
                         }
@@ -362,7 +362,7 @@ pub fn draw_listing(f: &mut Frame, app: &mut App, area: Rect) {
         all_rows.push(Line::raw(""));
         all_rows.push(Line::styled(
             "SYMBOL TABLE",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            rvs_theme::HEADING,
         ));
         let (sym_hdr, sym_div) = build_table_header(&[("ADDRESS", 18), ("SYMBOL", 16)]);
         all_rows.push(sym_hdr);
@@ -371,9 +371,9 @@ pub fn draw_listing(f: &mut Frame, app: &mut App, area: Rect) {
         for (name, value) in app.sim.sym.iter() {
             let v = rvs_tcl::parse_int(value).unwrap_or(0) as u64;
             let row = Line::from(vec![
-                Span::styled(format!("0x{v:016x}"), Style::default().fg(Color::Cyan)),
-                Span::styled(" │ ", Style::default().fg(Color::DarkGray)),
-                Span::styled(name.clone(), Style::default().fg(Color::LightMagenta).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("0x{v:016x}"), rvs_theme::INFO_PLAIN),
+                Span::styled(" │ ", rvs_theme::FAINT),
+                Span::styled(name.clone(), rvs_theme::LABEL),
             ]);
             all_rows.push(row);
         }
@@ -385,7 +385,7 @@ pub fn draw_listing(f: &mut Frame, app: &mut App, area: Rect) {
     let spd_label = format!("SPD:{}", app.run_speed.label());
     let toolbar = Line::from(vec![
         btn("InitPC"),
-        Span::styled(format!(" PC:0x{:016x} ", app.sim.regs.pc), Style::default().fg(Color::White)),
+        Span::styled(format!(" PC:0x{:016x} ", app.sim.regs.pc), rvs_theme::TEXT_STYLE),
         pill("TXT", app.sim.view.exec_txt),
         pill("CLR", app.colorize_listing),
         pill(&spd_label, app.run_speed != rvs_app::RunSpeed::Max),
@@ -408,12 +408,12 @@ pub fn draw_regs(f: &mut Frame, app: &mut App, area: Rect) {
         if clean_line.starts_with("INT Regs") || clean_line.starts_with("FLP Regs") {
             lines.push(Line::styled(
                 clean_line,
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                rvs_theme::HEADING,
             ));
         } else if clean_line.starts_with("---OFF---") {
             lines.push(Line::styled(
                 clean_line,
-                Style::default().fg(Color::DarkGray),
+                rvs_theme::MUTED,
             ));
         } else if let Some(stripped) = clean_line.strip_prefix('x') {
             let parts: Vec<&str> = stripped.split_whitespace().collect();
@@ -422,7 +422,7 @@ pub fn draw_regs(f: &mut Frame, app: &mut App, area: Rect) {
                 if i < 32 && app.changed_x(i) {
                     lines.push(Line::styled(
                         clean_line,
-                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                        rvs_theme::OK,
                     ));
                     continue;
                 }
@@ -435,25 +435,25 @@ pub fn draw_regs(f: &mut Frame, app: &mut App, area: Rect) {
                 };
 
                 let mut spans = vec![
-                    Span::styled(reg_name, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                    Span::styled(abi, Style::default().fg(Color::LightMagenta)),
+                    Span::styled(reg_name, rvs_theme::INFO),
+                    Span::styled(abi, rvs_theme::LABEL),
                 ];
 
                 if app.sim.view.reg_hex {
                     let hex_val = format!(" 0x{:016x}", val);
                     let hex_style = if val == 0 {
-                        Style::default().fg(Color::DarkGray)
+                        rvs_theme::MUTED
                     } else {
-                        Style::default().fg(Color::White)
+                        rvs_theme::TEXT_STYLE
                     };
                     spans.push(Span::styled(hex_val, hex_style));
                 }
 
                 let int_str = rvs_tcl::fmt_ld_pad(val as i64, 20);
                 let int_style = if val == 0 {
-                    Style::default().fg(Color::DarkGray)
+                    rvs_theme::MUTED
                 } else {
-                    Style::default().fg(Color::LightGreen)
+                    rvs_theme::OK_PLAIN
                 };
                 spans.push(Span::raw(" "));
                 spans.push(Span::styled(int_str, int_style));
@@ -461,7 +461,7 @@ pub fn draw_regs(f: &mut Frame, app: &mut App, area: Rect) {
                 lines.push(Line::from(spans));
                 continue;
             }
-            lines.push(Line::styled(clean_line, Style::default().fg(Color::Gray)));
+            lines.push(Line::styled(clean_line, rvs_theme::SECONDARY));
         } else if let Some(stripped) = clean_line.strip_prefix('f') {
             let parts: Vec<&str> = stripped.split_whitespace().collect();
             let i_opt = parts.first().and_then(|n| n.parse::<usize>().ok());
@@ -469,7 +469,7 @@ pub fn draw_regs(f: &mut Frame, app: &mut App, area: Rect) {
                 if i < 32 && app.changed_f(i) {
                     lines.push(Line::styled(
                         clean_line,
-                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                        rvs_theme::OK,
                     ));
                     continue;
                 }
@@ -477,15 +477,15 @@ pub fn draw_regs(f: &mut Frame, app: &mut App, area: Rect) {
                 let reg_name = format!("f{:<2}", i);
 
                 let mut spans = vec![
-                    Span::styled(reg_name, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::styled(reg_name, rvs_theme::INFO),
                 ];
 
                 if app.sim.view.reg_hex {
                     let hex_val = format!(" 0x{:016x}", bits);
                     let hex_style = if bits == 0 {
-                        Style::default().fg(Color::DarkGray)
+                        rvs_theme::MUTED
                     } else {
-                        Style::default().fg(Color::White)
+                        rvs_theme::TEXT_STYLE
                     };
                     spans.push(Span::styled(hex_val, hex_style));
                 }
@@ -498,9 +498,9 @@ pub fn draw_regs(f: &mut Frame, app: &mut App, area: Rect) {
                     "0.0000000000000000E+00"
                 };
                 let flp_style = if bits == 0 {
-                    Style::default().fg(Color::DarkGray)
+                    rvs_theme::MUTED
                 } else {
-                    Style::default().fg(Color::Yellow)
+                    rvs_theme::WARN_PLAIN
                 };
                 spans.push(Span::raw(" "));
                 spans.push(Span::styled(flp_str.to_string(), flp_style));
@@ -508,9 +508,9 @@ pub fn draw_regs(f: &mut Frame, app: &mut App, area: Rect) {
                 lines.push(Line::from(spans));
                 continue;
             }
-            lines.push(Line::styled(clean_line, Style::default().fg(Color::Gray)));
+            lines.push(Line::styled(clean_line, rvs_theme::SECONDARY));
         } else {
-            lines.push(Line::styled(clean_line, Style::default().fg(Color::DarkGray)));
+            lines.push(Line::styled(clean_line, rvs_theme::MUTED));
         }
     }
 
@@ -534,7 +534,7 @@ pub fn draw_mem(f: &mut Frame, app: &mut App, area: Rect) {
     // Line 1: Title
     all_rows.push(Line::styled(
         "MEMORY",
-        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        rvs_theme::HEADING,
     ));
 
     // Table headers
@@ -577,49 +577,49 @@ pub fn draw_mem(f: &mut Frame, app: &mut App, area: Rect) {
 
         let is_zero = rvs_syntax::is_zero_hex(&hex);
         let mut row_spans = vec![
-            Span::styled(format!("0x{addr:016x}"), Style::default().fg(Color::Cyan)),
+            Span::styled(format!("0x{addr:016x}"), rvs_theme::INFO_PLAIN),
         ];
 
         if app.sim.view.mem_hex {
-            row_spans.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
+            row_spans.push(Span::styled(" │ ", rvs_theme::FAINT));
             let hex_style = if is_zero {
-                Style::default().fg(Color::DarkGray)
+                rvs_theme::MUTED
             } else {
-                Style::default().fg(Color::White)
+                rvs_theme::TEXT_STYLE
             };
             row_spans.push(Span::styled(format!("{:<18}", hex), hex_style));
         }
 
         if app.sim.view.mem_int {
-            row_spans.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
+            row_spans.push(Span::styled(" │ ", rvs_theme::FAINT));
             let int_str = match rvs_tcl::fmt_ld_str(&hex) {
                 Some(v) => rvs_tcl::fmt_s_pad(v.trim(), 20),
                 None => rvs_tcl::fmt_s_pad("NOT_AN_INT", 20),
             };
             let int_style = if is_zero {
-                Style::default().fg(Color::DarkGray)
+                rvs_theme::MUTED
             } else {
-                Style::default().fg(Color::LightGreen)
+                rvs_theme::OK_PLAIN
             };
             row_spans.push(Span::styled(int_str, int_style));
         }
 
         if app.sim.view.mem_flp {
-            row_spans.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
+            row_spans.push(Span::styled(" │ ", rvs_theme::FAINT));
             let flp_str = match rvs_tcl::x2f(&hex).and_then(rvs_tcl::fmt_e24) {
                 Some(v) => format!("{:<24}", v.trim()),
                 None => rvs_tcl::fmt_s_pad("NOT_A_FLP", 24),
             };
             let flp_style = if is_zero {
-                Style::default().fg(Color::DarkGray)
+                rvs_theme::MUTED
             } else {
-                Style::default().fg(Color::Yellow)
+                rvs_theme::WARN_PLAIN
             };
             row_spans.push(Span::styled(flp_str, flp_style));
         }
 
         if app.sim.view.mem_txt {
-            row_spans.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
+            row_spans.push(Span::styled(" │ ", rvs_theme::FAINT));
             let formatted_src = rvs_asm_syntax::render_line_f1(&rvs_asm_syntax::split_line(&source_line));
             let mut src_spans = rvs_syntax::highlight_source_line(&formatted_src);
             row_spans.append(&mut src_spans);
@@ -631,7 +631,7 @@ pub fn draw_mem(f: &mut Frame, app: &mut App, area: Rect) {
     if data_rows_count == 0 {
         all_rows.push(Line::styled(
             "  (no data cells: use DD/DW/DH/DB/DC/DF/DM)",
-            Style::default().fg(Color::DarkGray),
+            rvs_theme::MUTED,
         ));
     }
     let lines: Vec<Line> = all_rows.into_iter().skip(app.scroll_mem).take(height).collect();
@@ -669,35 +669,35 @@ pub fn draw_exec(f: &mut Frame, app: &mut App, area: Rect) {
         if clean_line.starts_with("ERROR:") {
             lines.push(Line::styled(
                 clean_line,
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                rvs_theme::ERR,
             ));
         } else if clean_line.starts_with("WARN") {
             lines.push(Line::styled(
                 clean_line,
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                rvs_theme::WARN,
             ));
         } else if clean_line.starts_with("ebreak") {
             lines.push(Line::styled(
                 clean_line,
-                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                rvs_theme::LABEL,
             ));
         } else if clean_line == "START" || clean_line == "NEXT" || clean_line == "RUN" {
             lines.push(Line::styled(
                 clean_line,
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                rvs_theme::FOCUS,
             ));
         } else if clean_line.starts_with("0x") && clean_line.len() >= 18 {
             let addr_part = clean_line[..18].to_string();
             let rest = clean_line[18..].to_string();
             let mut spans = vec![Span::styled(
                 addr_part,
-                Style::default().fg(Color::Cyan),
+                rvs_theme::INFO_PLAIN,
             )];
             let mut rest_spans = rvs_syntax::highlight_inst_operands(&rest);
             spans.append(&mut rest_spans);
             lines.push(Line::from(spans));
         } else {
-            lines.push(Line::styled(clean_line, Style::default().fg(Color::Gray)));
+            lines.push(Line::styled(clean_line, rvs_theme::SECONDARY));
         }
     }
     f.render_widget(Paragraph::new(lines), text_area);
@@ -728,7 +728,7 @@ pub fn draw_out(f: &mut Frame, app: &mut App, area: Rect) {
     let mut lines = Vec::new();
     for line_str in app.sim.output.lines().skip(scroll).take(height) {
         let clean_line = expand_tabs(line_str, 8);
-        lines.push(Line::styled(clean_line, Style::default().fg(Color::White)));
+        lines.push(Line::styled(clean_line, rvs_theme::TEXT_STYLE));
     }
 
     f.render_widget(Paragraph::new(lines), text_area);
@@ -736,7 +736,7 @@ pub fn draw_out(f: &mut Frame, app: &mut App, area: Rect) {
     let dma_status = if app.dma_out_available {
         pill(if app.sim.view.dma_out { "DMA:ON" } else { "DMA:OFF" }, app.sim.view.dma_out)
     } else {
-        Span::styled(" [DMA:N/A] ", Style::default().fg(Color::DarkGray))
+        Span::styled(" [DMA:N/A] ", rvs_theme::MUTED)
     };
     let toolbar = Line::from(vec![btn("Clear"), dma_status]);
     f.render_widget(Paragraph::new(toolbar), toolbar_area);
@@ -770,17 +770,17 @@ pub fn draw_inp(f: &mut Frame, app: &mut App, area: Rect) {
     };
 
     let prompt_style = if awaiting && app.blink_on() {
-        Style::default().bg(Color::Red).fg(Color::White).add_modifier(Modifier::BOLD)
+        rvs_theme::BADGE_ERR
     } else if awaiting {
-        Style::default().bg(Color::DarkGray).fg(Color::White)
+        rvs_theme::BADGE_NEUTRAL
     } else {
-        Style::default().fg(Color::DarkGray)
+        rvs_theme::MUTED
     };
 
     let entry_line = Line::from(vec![
         Span::styled(format!(" {prompt_label} "), prompt_style),
         Span::raw(" "),
-        Span::styled(&app.input_line, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(&app.input_line, rvs_theme::FOCUS),
     ]);
     f.render_widget(Paragraph::new(entry_line), entry_area);
 
@@ -795,7 +795,7 @@ pub fn draw_inp(f: &mut Frame, app: &mut App, area: Rect) {
     let dma_status = if app.dma_inp_available {
         pill(if app.sim.view.dma_inp { "DMA:ON" } else { "DMA:OFF" }, app.sim.view.dma_inp)
     } else {
-        Span::styled(" [DMA:N/A] ", Style::default().fg(Color::DarkGray))
+        Span::styled(" [DMA:N/A] ", rvs_theme::MUTED)
     };
     let toolbar = Line::from(vec![btn("Enter"), btn("Cancel"), dma_status]);
     f.render_widget(Paragraph::new(toolbar), toolbar_area);
@@ -811,7 +811,7 @@ fn render_pane_with_toolbar(f: &mut Frame, app: &App, pane: Pane, area: Rect) ->
     if inner.height < 2 {
         return None;
     }
-    f.render_widget(Clear, inner);
+    f.render_widget(Block::default().style(rvs_theme::PANE), inner);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(1)])

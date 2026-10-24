@@ -33,3 +33,5 @@ rvs-transpile = { path = "../rvs-transpile" }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 signal-hook = { workspace = true }
+
+rvs-theme = { path = "../rvs-theme" }

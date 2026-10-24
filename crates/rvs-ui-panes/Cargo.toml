@@ -17,3 +17,4 @@ rvs-format = { path = "../rvs-format" }
 ratatui = { workspace = true }
 unicode-width = { workspace = true }
 unicode-segmentation = { workspace = true }
+rvs-theme = { path = "../rvs-theme" }

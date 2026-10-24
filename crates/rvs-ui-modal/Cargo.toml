@@ -10,3 +10,4 @@ rvs-app = { path = "../rvs-app" }
 rvs-ui-panes = { path = "../rvs-ui-panes" }
 rvs-explorer = { path = "../rvs-explorer" }
 ratatui = { workspace = true }
+rvs-theme = { path = "../rvs-theme" }
