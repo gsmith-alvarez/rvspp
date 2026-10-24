@@ -181,9 +181,13 @@ cargo run --release
 | `c` | **Compile** assembly source |
 | `s` | **START**: Reset PC to `START` address and begin execution |
 | `n` | **Next / Step**: Execute one instruction (or `:n <count>` in Command mode) |
-| `r` | **Run**: Execute continuously until `ebreak`, error, or stop |
+| `p` / `P` / `N` | **Step Back / Prev**: Rewind simulator by 1 instruction from the 128-state history ring buffer |
+| `r` | **Run**: Execute continuously until `ebreak`, error, stop, or breakpoint |
 | `x` | **Stop**: Halt continuous execution (when not in Source pane) |
-
+| `B` | **Breakpoint**: Toggle breakpoint on the current line in Source (or current PC in Listing) |
+| `b` | Toggle breakpoint on current PC (when in Listing pane) |
+| `+` / `]` | **Speed Up**: Increase execution animation speed (`1Hz` $\to$ `5Hz` $\to$ `20Hz` $\to$ `Max`) |
+| `-` / `[` | **Slow Down**: Decrease execution animation speed |
 ### Vim Editing in Source Pane
 | Key | Action |
 | :--- | :--- |
@@ -202,12 +206,25 @@ cargo run --release
 | `Ctrl+D` / `Ctrl+U` | Half-page scroll down / up |
 | `Esc` | Return to `NORMAL` mode |
 
-### Format Pill Toggles (Number Keys in Normal Mode)
-- **`Listing` Pane**: `1`: Toggle TXT column ` │ ` `2`: Toggle Correlated `[CLR]` colorizer ` │ ` `0` / `i`: InitPC
-- **`Regs` Pane**: `1`: Toggle HEX values ` │ ` `2`: Toggle INT registers ` │ ` `3`: Toggle FLP registers
-- **`Mem` Pane**: `1`: Toggle HEX ` │ ` `2`: Toggle INT ` │ ` `3`: Toggle FLP ` │ ` `4`: Toggle TXT
-- **`OUT` / `INP` Panes**: `d` (or `1`): Toggle DMA active state
-
+### Pane Toolbar & Shortcut Toggles
+- **`Listing` Pane**:
+  - `1`: Toggle TXT source column
+  - `2`: Toggle Correlated `[CLR]` colorizer (maps bitfields to operands)
+  - `0` / `i`: InitPC (reset PC to START without running)
+  - Click `[SPD:...]`: Cycle execution speed (`1Hz`, `5Hz`, `20Hz`, `Max`)
+  - `[BP]`: Active breakpoint indicator (click or press `b` to toggle at PC)
+- **`Regs` Pane**:
+  - `1`: Toggle HEX values ` │ ` `2`: Toggle INT registers ` │ ` `3`: Toggle FLP registers
+- **`Mem` Pane**:
+  - `1`: Toggle HEX ` │ ` `2`: Toggle INT ` │ ` `3`: Toggle FLP ` │ ` `4`: Toggle TXT
+  - `[SP]`: Jump memory scroll directly to current stack pointer (`$sp` / `x2`)
+  - `[0x0]`: Jump memory scroll back to base address `0x0`
+- **`Exec` Pane**:
+  - `[Clear]`: Clear execution trace log
+  - `[STATS]`: Open Execution Metrics & Hardware Counters modal
+  - `[CC:ON/OFF]`: Toggle Calling Convention compliance checker
+- **`OUT` / `INP` Panes**:
+  - `d` (or `1`): Toggle DMA active state
 ### File Explorer Modal (`Ctrl+O` or `:e`)
 - **Normal Mode (Yazi-style)**:
   - `j` / `k` / `Down` / `Up`: Navigate file list
@@ -225,6 +242,77 @@ RVS supports memory-mapped I/O at fixed low-memory addresses:
 - **Output (`OUT`)**: Define labels `OUTC` (`0x0`, control word) and `OUTD` (`0x8`, data word). When present, DMA OUT auto-enables on compile.
 - **Input (`INP`)**: Define labels `INPC` (`0x10`, control word) and `INPD` (`0x18`, data word). When present, DMA INP auto-enables on compile.
 
+
+### Advanced Debugging, Metrics & Profiling Capabilities
+
+#### 1. Interactive Breakpoints (Source & Listing)
+- Set breakpoints by:
+  - Pressing `B` in Normal mode on the current line in `Source`.
+  - Running `:b` (uses current line in `Source`, or current PC in `Listing`).
+  - Running `:b <line>` (e.g. `:b 15`), `:b pc`, `:b <label>`, or `:b <addr>`.
+  - Running `:cb` or `:clearbreaks` to clear all breakpoints.
+- Visuals: Lines with active breakpoints display a prominent red `● ` indicator and bold red line numbers in both the `Source` editor and `Listing` table.
+- Running (`r`) pauses immediately before executing any breakpoint address.
+
+#### 2. "Step Back" / Reverse Step (`Prev`)
+- `App` continuously maintains a 128-state ring buffer of full simulator snapshots (`regs`, `mem`, `exec_log`, `output`, `pc`).
+- Press `p`, `P`, `N` (Shift+N), or run `:prev` / `:back` to step backward by 1 instruction, restoring exact register and memory states.
+
+#### 3. Visual Execution Animation & Speed Control
+- Control simulation speed using `+` / `-` (or `[` / `]`), clicking `[SPD:...]` in the `Listing` toolbar, or running `:speed <1|5|20|max>`.
+- In `1Hz`, `5Hz`, or `20Hz` modes, pressing `r` (Run) steps instruction-by-instruction with live visual updates to all 6 panes, animating algorithm execution in real time.
+
+#### 4. Hardware Counters & Dynamic Profiling (`:stats`)
+- Run `:stats`, `:metrics`, or click `[STATS]` in the `Exec` toolbar to inspect:
+  - **Total Instructions & Estimated Cycles**: Cycle accurate model accounting for 1-cycle ALU ops, branch penalties (+1 for taken branches), load-to-use latency (+1), multi-cycle multiply/divide (+2), and `ecall` syscall overhead (+4).
+  - **Average CPI**: Live dynamic CPI (`cycles / instructions`).
+  - **Branch Prediction Stats**: Total branches, branches taken, and taken percentage rate (`%`).
+  - **Memory Accesses**: Total loads and stores.
+  - **Instruction Mix Breakdown**: Categorized counts for ALU, Memory, Jumps, Floating-Point, and Syscalls.
+
+#### 5. Calling Convention Compliance Checker (`:cc`)
+- An automated linter designed for university computer architecture courses:
+  - **16-Byte Stack Alignment**: On every function call (`jal ra`, `jalr ra`), verifies that `$sp` satisfies `sp % 16 == 0`.
+  - **Saved Register Preservation**: Shadow-tracks all 12 integer saved registers (`s0`–`s11` / `x8`, `x9`, `x18`–`x27`) and float saved registers upon function entry. On function return (`jalr zero, ra, 0`), verifies that all saved registers and `$sp` were properly restored.
+  - Logs bold `WARN [Convention]` messages in `Exec` and lists violations in `:stats`.
+  - Toggle via `:cc on`, `:cc off`, `:cc`, or clicking `[CC:ON]` / `[CC:OFF]`.
+
+#### 6. Memory Navigation & Stack Pointer Jump
+- Click `[SP]` in the `Mem` toolbar or run `:mem sp` / `:mem stack` to jump memory view directly to `$sp` (`x2`) to inspect active stack frames.
+- Click `[0x0]` or run `:mem 0` to jump back to address `0x0`.
+- Jump to any arbitrary address or symbol with `:mem <addr>` or `:mem <symbol>` (e.g. `:mem 0x2000`, `:mem OUTC`).
+
+---
+
+### Colon Command Reference (`:`)
+
+Press `:` in Normal mode to enter Command mode:
+
+| Command | Description |
+| :--- | :--- |
+| `:w [path]` | Save current file (or Save As if untitled) |
+| `:q` | Quit simulator (prompts to save if real modifications exist) |
+| `:q!` | Force quit immediately without saving |
+| `:wq` / `:x` | Save and quit |
+| `:e [path]` | Open file in File Explorer (or load path directly) |
+| `:c` / `:compile` | Compile assembly source |
+| `:s` / `:start` | Reset PC to `START` address and run |
+| `:n [count]` | Step `1` or `count` instructions |
+| `:p` / `:prev` | Step back / rewind 1 instruction |
+| `:r` / `:run` | Run continuously |
+| `:stop` / `:halt` | Halt continuous execution |
+| `:reset` / `:initpc` | Reset PC to `START` without running |
+| `:b [line\|addr\|label\|pc]` | Toggle breakpoint (uses cursor line in Source, or specified target) |
+| `:cb` / `:clearbreaks` | Clear all active breakpoints |
+| `:speed <1\|5\|20\|max>` | Set execution speed preset |
+| `:mem <sp\|addr\|label>` | Jump memory view to stack pointer or address |
+| `:color [on\|off]` | Toggle or set Listing correlated bitfield colorizing |
+| `:cc [on\|off]` | Toggle Calling Convention compliance checker |
+| `:stats` / `:metrics` | Open Execution Metrics & Hardware Counters dialog |
+| `:zoom` / `:z` | Toggle fullscreen zoom on focused pane |
+| `:clear` | Clear `Exec` trace log and `OUT` output |
+| `:edit` / `:nvim` | Open current buffer in external `$EDITOR` |
+| `:help` / `:h` | Open Help / About modal |
 ---
 
 ## Testing
