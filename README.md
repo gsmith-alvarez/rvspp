@@ -1,6 +1,6 @@
 # RVS++ (RISC-V Visual Simulator++)
 
-[![Release](https://img.shields.io/badge/version-1.0.0-cyan.svg)](https://github.com/gsmith-alvarez/rvs/releases)
+[![Release](https://img.shields.io/badge/version-1.0.0-cyan.svg)](https://github.com/gsmith-alvarez/rvspp/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 An interactive, fast terminal-based RISC-V simulator and debugger (RV64IMFD) written in pure Rust.
