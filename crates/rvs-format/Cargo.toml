@@ -13,3 +13,4 @@ rvs-executor = { path = "../rvs-executor" }
 rvs-assembler = { path = "../rvs-assembler" }
 rvs-asm-syntax = { path = "../rvs-asm-syntax" }
 rvs-regs = { path = "../rvs-regs" }
+rvs-transpile = { path = "../rvs-transpile" }

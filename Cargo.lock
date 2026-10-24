@@ -1480,7 +1480,7 @@ dependencies = [
 
 [[package]]
 name = "rvs-app"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "ratatui",
  "rvs-editor",
@@ -1491,7 +1491,7 @@ dependencies = [
 
 [[package]]
 name = "rvs-app-cmds"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "crossterm",
  "ratatui",
@@ -1504,7 +1504,7 @@ dependencies = [
 
 [[package]]
 name = "rvs-app-keys"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "crossterm",
  "rvs-app",
@@ -1516,7 +1516,7 @@ dependencies = [
 
 [[package]]
 name = "rvs-asm-syntax"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "rvs-memory",
  "rvs-tcl",
@@ -1524,7 +1524,7 @@ dependencies = [
 
 [[package]]
 name = "rvs-assembler"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "rvs-asm-syntax",
  "rvs-ecall",
@@ -1538,7 +1538,7 @@ dependencies = [
 
 [[package]]
 name = "rvs-ecall"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "rvs-asm-syntax",
  "rvs-memory",
@@ -1549,7 +1549,7 @@ dependencies = [
 
 [[package]]
 name = "rvs-editor"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "proptest",
  "unicode-segmentation",
@@ -1557,7 +1557,7 @@ dependencies = [
 
 [[package]]
 name = "rvs-executor"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "rvs-asm-syntax",
  "rvs-ecall",
@@ -1570,14 +1570,14 @@ dependencies = [
 
 [[package]]
 name = "rvs-explorer"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "dirs",
 ]
 
 [[package]]
 name = "rvs-format"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "rvs-asm-syntax",
  "rvs-assembler",
@@ -1586,11 +1586,12 @@ dependencies = [
  "rvs-regs",
  "rvs-sim",
  "rvs-tcl",
+ "rvs-transpile",
 ]
 
 [[package]]
 name = "rvs-fpu"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "rvs-memory",
  "rvs-regs",
@@ -1600,7 +1601,7 @@ dependencies = [
 
 [[package]]
 name = "rvs-machine"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "unicode-segmentation",
  "unicode-width",
@@ -1608,7 +1609,7 @@ dependencies = [
 
 [[package]]
 name = "rvs-machine-riscv"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "rvs-asm-syntax",
  "rvs-assembler",
@@ -1626,18 +1627,18 @@ dependencies = [
 
 [[package]]
 name = "rvs-memory"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "rvs-tcl",
 ]
 
 [[package]]
 name = "rvs-regs"
-version = "1.0.0"
+version = "1.1.0"
 
 [[package]]
 name = "rvs-sim"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "rvs-memory",
  "rvs-regs",
@@ -1647,7 +1648,7 @@ dependencies = [
 
 [[package]]
 name = "rvs-syntax"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "rvs-asm-syntax",
  "rvs-machine",
@@ -1656,14 +1657,14 @@ dependencies = [
 
 [[package]]
 name = "rvs-tcl"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "proptest",
 ]
 
 [[package]]
 name = "rvs-theme"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "ratatui",
  "rvs-machine",
@@ -1671,14 +1672,18 @@ dependencies = [
 
 [[package]]
 name = "rvs-transpile"
-version = "1.0.0"
+version = "1.1.0"
+dependencies = [
+ "proptest",
+]
 
 [[package]]
 name = "rvs-tui"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "clap",
  "crossterm",
+ "dirs",
  "insta",
  "libc",
  "ratatui",
@@ -1695,7 +1700,7 @@ dependencies = [
 
 [[package]]
 name = "rvs-ui"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "crossterm",
  "ratatui",
@@ -1709,7 +1714,7 @@ dependencies = [
 
 [[package]]
 name = "rvs-ui-modal"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "ratatui",
  "rvs-app",
@@ -1720,7 +1725,7 @@ dependencies = [
 
 [[package]]
 name = "rvs-ui-panes"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "ratatui",
  "rvs-app",

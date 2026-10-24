@@ -1,6 +1,5 @@
 //! rvs-tui: the `rvs` binary: CLI parsing, batch routing and the TUI.
 
-
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -8,7 +7,7 @@ use clap::Parser;
 
 /// RVS++ - RISC-V Visual Simulator++ (RV64IMFD), Rust rewrite of RVS046.
 #[derive(Parser, Debug)]
-#[command(name = "rvs++", version = "1.0.0", about = "RVS++ - RISC-V Visual Simulator++ (RV64IMFD)")]
+#[command(name = "rvs++", version = env!("CARGO_PKG_VERSION"), about = "RVS++ - RISC-V Visual Simulator++ (RV64IMFD)")]
 pub struct Cli {
     /// Positional args: [asm_file] or [asm_file in_file out_file [timeout_ms]]
     pub args: Vec<String>,
@@ -20,6 +19,37 @@ pub struct Cli {
     /// Batch execution timeout in milliseconds (default: 3000)
     #[arg(short, long, default_value_t = 3000)]
     pub timeout: u64,
+
+    /// Assembly dialect for batch mode: auto (default), rvs, or gnu
+    #[arg(long, default_value = "auto", value_parser = ["auto", "rvs", "rvs046", "gnu", "gas"])]
+    pub dialect: String,
+
+    /// Omit the per-instruction trace from the batch report (faster, smaller)
+    #[arg(long)]
+    pub no_trace: bool,
+
+    /// Also write a machine-readable JSON summary to this path
+    #[arg(long, value_name = "PATH")]
+    pub json: Option<PathBuf>,
+
+    /// Exit 2 when assembly or execution failed (default: 0, like kkbatch)
+    #[arg(long)]
+    pub fail_on_error: bool,
+
+    /// Syscall convention: rvs (default, course dialect) or a7 (RARS/GNU)
+    #[arg(long, default_value = "rvs", value_parser = ["rvs", "a7"])]
+    pub abi: String,
+}
+
+impl Cli {
+    /// `None` means "detect from the source".
+    fn dialect(&self) -> Option<rvs_machine::Dialect> {
+        match self.dialect.to_ascii_lowercase().as_str() {
+            "rvs" | "rvs046" => Some(rvs_machine::Dialect::Rvs),
+            "gnu" | "gas" => Some(rvs_machine::Dialect::Gnu),
+            _ => None,
+        }
+    }
 }
 
 /// Route: batch when `--batch` or 3+ positionals, else the TUI.
@@ -36,8 +66,15 @@ pub fn route(cli: Cli) -> ExitCode {
             .unwrap_or(cli.timeout);
         match (asm, input, out) {
             (Some(asm), Some(input), Some(out)) => {
-                match rvs_machine_riscv::run_batch_file(&asm, &input, &out, timeout) {
-                    Ok(()) => ExitCode::SUCCESS,
+                let request = rvs_machine_riscv::BatchRequest {
+                    dialect: cli.dialect(),
+                    trace: !cli.no_trace,
+                    json: cli.json.as_deref(),
+                    a7: cli.abi == "a7",
+                };
+                match rvs_machine_riscv::run_batch_file(&asm, &input, &out, timeout, request) {
+                    Ok(report) if cli.fail_on_error && report.failed() => ExitCode::from(2),
+                    Ok(_) => ExitCode::SUCCESS,
                     Err(e) => {
                         eprintln!("{e}");
                         ExitCode::FAILURE
@@ -62,8 +99,8 @@ use ratatui::Terminal;
 
 use rvs_app::{App, RunSpeed};
 use rvs_app_cmds::AppCommands;
-use rvs_machine_riscv::RiscV;
 use rvs_app_keys::AppKeys;
+use rvs_machine_riscv::RiscV;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};
@@ -85,6 +122,26 @@ pub fn setup_signal_handlers() {
 
 #[cfg(not(unix))]
 pub fn setup_signal_handlers() {}
+
+#[cfg(test)]
+mod crash_tests {
+    use super::save_recovery_buffer;
+    use rvs_app::App;
+    use rvs_machine_riscv::RiscV;
+
+    #[test]
+    fn recovery_buffer_holds_the_editor_text() {
+        // `dirs` honours XDG_DATA_HOME, so the test never touches $HOME.
+        let tmp = std::env::temp_dir().join(format!("rvs-recovery-test-{}", std::process::id()));
+        std::env::set_var("XDG_DATA_HOME", &tmp);
+        let mut app = App::<RiscV>::new(None);
+        app.editor.set_text("START: addi x1, x0, 1\n");
+        let path = save_recovery_buffer(&app).expect("recovery file");
+        let saved = std::fs::read_to_string(&path).expect("read back");
+        assert!(saved.contains("addi x1, x0, 1"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
 
 #[cfg(all(test, unix))]
 mod signal_tests {
@@ -142,10 +199,47 @@ fn poll_terminal_event(timeout: Duration) -> Result<bool, Box<dyn std::error::Er
     Ok(crossterm::event::poll(timeout)?)
 }
 
+/// Leave the alternate screen and raw mode. Safe to call more than once and
+/// from a panic hook, where every operation has to stay best-effort.
+fn restore_terminal() {
+    let mut stdout = std::io::stdout();
+    let _ = crossterm::terminal::disable_raw_mode();
+    let _ = crossterm::execute!(
+        stdout,
+        crossterm::terminal::LeaveAlternateScreen,
+        DisableMouseCapture,
+        crossterm::cursor::Show
+    );
+}
+
+/// Install a hook so a panic anywhere (including inside the simulator) still
+/// leaves a usable terminal behind.
+fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        restore_terminal();
+        default_hook(info);
+    }));
+}
+
+/// Write the editor buffer somewhere durable so a crash cannot cost the user
+/// their file. Returns the path on success.
+fn save_recovery_buffer(app: &App<RiscV>) -> Option<std::path::PathBuf> {
+    let dir = dirs::data_dir()?.join("rvs");
+    std::fs::create_dir_all(&dir).ok()?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let path = dir.join(format!("recovery-{stamp}.s"));
+    std::fs::write(&path, app.editor.text()).ok()?;
+    Some(path)
+}
 
 /// Terminal setup/teardown and the event loop.
 pub fn run_tui(cli: &Cli) -> ExitCode {
     setup_signal_handlers();
+    install_panic_hook();
     let mut stdout = std::io::stdout();
     let _ = crossterm::terminal::enable_raw_mode();
     let _ = crossterm::execute!(
@@ -156,64 +250,80 @@ pub fn run_tui(cli: &Cli) -> ExitCode {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = match Terminal::new(backend) {
         Ok(t) => t,
-        Err(_) => return ExitCode::FAILURE,
+        Err(_) => {
+            restore_terminal();
+            return ExitCode::FAILURE;
+        }
     };
     let result = event_loop(&mut terminal, cli);
-    let _ = crossterm::execute!(
-        terminal.backend_mut(),
-        crossterm::terminal::LeaveAlternateScreen,
-        DisableMouseCapture
-    );
-    let _ = crossterm::terminal::disable_raw_mode();
+    restore_terminal();
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(_) => ExitCode::FAILURE,
     }
 }
 
+type LoopError = Box<dyn std::error::Error>;
+
 fn event_loop(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     cli: &Cli,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), LoopError> {
     let mut app = App::<RiscV>::new(cli.args.first());
     loop {
         if is_terminated() {
             return Ok(());
         }
-        if app.needs_full_clear {
-            app.needs_full_clear = false;
-            terminal.clear()?;
-        }
-        terminal.draw(|f| rvs_ui::draw(f, &mut app))?;
-        let timeout = if app.running {
-            app.run_speed.delay().unwrap_or(Duration::from_millis(16))
-        } else {
-            Duration::from_millis(80)
-        };
-        if poll_terminal_event(timeout)? {
-            match crossterm::event::read()? {
-                Event::Key(key) if key.kind == crossterm::event::KeyEventKind::Press => {
-                    app.on_key(key)
+        // One iteration is one unwind boundary: a bug in the assembler or the
+        // executor must not take the user's unsaved buffer with it.
+        let tick = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+            || -> Result<bool, LoopError> {
+                if app.needs_full_clear {
+                    app.needs_full_clear = false;
+                    terminal.clear()?;
                 }
-                Event::Mouse(m) => rvs_ui::handle_mouse(&mut app, m),
-                Event::Resize(_, _) => {}
-                _ => {}
+                terminal.draw(|f| rvs_ui::draw(f, &mut app))?;
+                let timeout = if app.running {
+                    app.run_speed.delay().unwrap_or(Duration::from_millis(16))
+                } else {
+                    Duration::from_millis(80)
+                };
+                if poll_terminal_event(timeout)? {
+                    match crossterm::event::read()? {
+                        Event::Key(key) if key.kind == crossterm::event::KeyEventKind::Press => {
+                            app.on_key(key)
+                        }
+                        Event::Mouse(m) => rvs_ui::handle_mouse(&mut app, m),
+                        Event::Resize(_, _) => {}
+                        _ => {}
+                    }
+                }
+                if app.pending_external_editor {
+                    app.pending_external_editor = false;
+                    let _ = app.run_external_editor(terminal);
+                }
+                if app.running {
+                    if app.run_speed == RunSpeed::Max {
+                        app.run_chunk(Duration::from_millis(8));
+                    } else {
+                        app.do_step();
+                    }
+                }
+                app.tick += 1;
+                Ok(app.quit_requested)
+            },
+        ));
+        match tick {
+            Ok(Ok(true)) => return Ok(()),
+            Ok(Ok(false)) => {}
+            Ok(Err(e)) => return Err(e),
+            Err(_) => {
+                let saved = save_recovery_buffer(&app);
+                return Err(match saved {
+                    Some(p) => format!("internal error; buffer saved to {}", p.display()).into(),
+                    None => "internal error; buffer could not be saved".into(),
+                });
             }
-        }
-        if app.pending_external_editor {
-            app.pending_external_editor = false;
-            let _ = app.run_external_editor(terminal);
-        }
-        if app.running {
-            if app.run_speed == RunSpeed::Max {
-                app.run_chunk(Duration::from_millis(8));
-            } else {
-                app.do_step();
-            }
-        }
-        app.tick += 1;
-        if app.quit_requested {
-            return Ok(());
         }
     }
 }

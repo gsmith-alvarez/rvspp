@@ -19,7 +19,10 @@ pub fn draw_modal<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
                 .style(rvs_theme::PANE)
                 .border_type(BorderType::Double)
                 .border_style(rvs_theme::INFO_PLAIN)
-                .title(Span::styled(" About / Help & Command Reference (?) ", rvs_theme::FOCUS));
+                .title(Span::styled(
+                    " About / Help & Command Reference (?) ",
+                    rvs_theme::FOCUS,
+                ));
             let inner = block.inner(modal_area);
             f.render_widget(block, modal_area);
 
@@ -40,6 +43,7 @@ pub fn draw_modal<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
                 Line::raw("  o / O             - Insert line below / above and enter INSERT mode"),
                 Line::raw("  x / dd / yy / p   - Delete char, delete line, yank line, paste below"),
                 Line::raw("  u / Ctrl+R        - Undo / Redo in buffer"),
+                Line::raw("  <count>motion     - Repeat a motion (3j, 4w, 5x)"),
                 Line::raw("  Ctrl+O, :e        - Open File Explorer (Yazi-style modal)"),
                 Line::raw("  Ctrl+S, :w        - Save current buffer"),
                 Line::raw(""),
@@ -53,6 +57,11 @@ pub fn draw_modal<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
                 Line::raw("  B in Source       - Toggle breakpoint at current cursor line (red ● marker)"),
                 Line::raw("  b in Listing      - Toggle breakpoint at current PC; :cb to clear all"),
                 Line::raw("  :b <line|addr|pc> - Toggle breakpoint at line, address, or PC"),
+                Line::raw("  :b <target> if <expr> - Conditional breakpoint (x1 == 3, a0 != 0)"),
+                Line::raw("  :next / :finish   - Step over a call / run until the current function returns"),
+                Line::raw("  :watch <sp|addr|label> - Stop when that cell's value changes; :cwatch clears"),
+                Line::raw("  / then Ctrl+N/P   - Search the buffer, repeat next/previous match"),
+                Line::raw("  :abi [rvs|a7]     - Syscall convention (course dialect vs RARS a7)"),
                 Line::raw("  +, - ([, ]), :spd - Adjust execution animation speed (1Hz, 5Hz, 20Hz, Max)"),
                 Line::raw("  :mem <sp|addr>    - Jump memory scroll to stack ($sp), 0x0, or arbitrary address"),
                 Line::raw(""),
@@ -122,10 +131,7 @@ pub fn draw_modal<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
                     Span::styled("Path: ", rvs_theme::HEADING),
                     Span::styled(&app.modal_input, rvs_theme::INFO),
                 ]),
-                Line::styled(
-                    hints_text,
-                    rvs_theme::MUTED,
-                ),
+                Line::styled(hints_text, rvs_theme::MUTED),
                 Line::styled("─".repeat(inner.width as usize), rvs_theme::MUTED),
             ];
             f.render_widget(Paragraph::new(top_lines), main_chunks[0]);
@@ -168,7 +174,14 @@ pub fn draw_modal<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
             }
 
             let mut list_rows = Vec::new();
-            for (idx, item) in app.explorer.entries.iter().enumerate().skip(app.explorer.scroll_list).take(visible_height) {
+            for (idx, item) in app
+                .explorer
+                .entries
+                .iter()
+                .enumerate()
+                .skip(app.explorer.scroll_list)
+                .take(visible_height)
+            {
                 let is_sel = idx == app.explorer.selected;
                 let pfx = if is_sel { "> " } else { "  " };
                 let disp_name = if item.name == ".." {
@@ -207,7 +220,10 @@ pub fn draw_modal<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
                     let name_str = if total_w > fixed_len {
                         let max_name = total_w - fixed_len;
                         if disp_name.chars().count() > max_name && max_name > 3 {
-                            format!("{}...", disp_name.chars().take(max_name - 3).collect::<String>())
+                            format!(
+                                "{}...",
+                                disp_name.chars().take(max_name - 3).collect::<String>()
+                            )
                         } else {
                             disp_name
                         }
@@ -239,11 +255,20 @@ pub fn draw_modal<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
             let prev_width = prev_inner.width as usize;
             let prev_height = prev_inner.height as usize;
             let mut prev_lines = Vec::new();
-            for raw_line in app.explorer.preview_lines.iter().skip(app.explorer.scroll_preview).take(prev_height) {
+            for raw_line in app
+                .explorer
+                .preview_lines
+                .iter()
+                .skip(app.explorer.scroll_preview)
+                .take(prev_height)
+            {
                 let expanded = expand_tabs(raw_line, 8);
                 let l: String = expanded.chars().take(prev_width).collect();
                 if l.trim_start().starts_with("[DIR]") {
-                    prev_lines.push(Line::styled(l, rvs_theme::INFO_PLAIN.add_modifier(Modifier::BOLD)));
+                    prev_lines.push(Line::styled(
+                        l,
+                        rvs_theme::INFO_PLAIN.add_modifier(Modifier::BOLD),
+                    ));
                 } else if l.contains('│') {
                     let parts: Vec<&str> = l.splitn(2, '│').collect();
                     if parts.len() == 2 {
@@ -276,28 +301,48 @@ pub fn draw_modal<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
                 .style(rvs_theme::PANE)
                 .border_type(BorderType::Double)
                 .border_style(rvs_theme::ERR)
-                .title(Span::styled(" Unsaved Changes: Save Before Leaving? ", rvs_theme::HEADING));
+                .title(Span::styled(
+                    " Unsaved Changes: Save Before Leaving? ",
+                    rvs_theme::HEADING,
+                ));
             let inner = block.inner(modal_area);
             f.render_widget(block, modal_area);
 
             let text = vec![
-                Line::styled("There are unsaved changes in your source buffer.", rvs_theme::TEXT_STYLE),
-                Line::styled(format!("Would you like to save changes before {action_desc}?"), rvs_theme::WARN_PLAIN),
+                Line::styled(
+                    "There are unsaved changes in your source buffer.",
+                    rvs_theme::TEXT_STYLE,
+                ),
+                Line::styled(
+                    format!("Would you like to save changes before {action_desc}?"),
+                    rvs_theme::WARN_PLAIN,
+                ),
                 Line::raw(""),
                 Line::from(vec![
                     Span::styled("File path: [ ", rvs_theme::INFO),
-                    Span::styled(&app.modal_input, Style::default().fg(rvs_theme::TEXT).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        &app.modal_input,
+                        Style::default()
+                            .fg(rvs_theme::TEXT)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(" ]", rvs_theme::INFO),
                 ]),
                 Line::raw(""),
                 Line::from(vec![
                     Span::styled(" [Enter]  ", rvs_theme::BADGE_ON),
-                    Span::styled(" Save to file path above and proceed", rvs_theme::TEXT_STYLE),
+                    Span::styled(
+                        " Save to file path above and proceed",
+                        rvs_theme::TEXT_STYLE,
+                    ),
                 ]),
                 Line::raw(""),
                 Line::from(vec![
                     Span::styled(" [Ctrl+D] ", rvs_theme::BADGE_ERR),
-                    Span::styled(" Discard changes and proceed without saving", rvs_theme::TEXT_STYLE),
+                    Span::styled(
+                        " Discard changes and proceed without saving",
+                        rvs_theme::TEXT_STYLE,
+                    ),
                 ]),
                 Line::raw(""),
                 Line::from(vec![
@@ -322,7 +367,10 @@ pub fn draw_modal<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
                 .style(rvs_theme::PANE)
                 .border_type(BorderType::Double)
                 .border_style(rvs_theme::INFO_PLAIN)
-                .title(Span::styled(" Execution Metrics & Hardware Counters (:stats) ", rvs_theme::HEADING));
+                .title(Span::styled(
+                    " Execution Metrics & Hardware Counters (:stats) ",
+                    rvs_theme::HEADING,
+                ));
             let inner = block.inner(modal_area);
             f.render_widget(block, modal_area);
 
@@ -333,7 +381,12 @@ pub fn draw_modal<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
                 Line::raw(""),
                 Line::from(vec![
                     Span::styled("  Total Instructions:   ", rvs_theme::SECONDARY),
-                    Span::styled(format!("{:<10}", m.instructions), Style::default().fg(rvs_theme::TEXT).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        format!("{:<10}", m.instructions),
+                        Style::default()
+                            .fg(rvs_theme::TEXT)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled("Estimated Cycles: ", rvs_theme::SECONDARY),
                     Span::styled(format!("{:<10}", m.cycles), rvs_theme::OK),
                     Span::styled("Average CPI: ", rvs_theme::SECONDARY),
@@ -355,7 +408,10 @@ pub fn draw_modal<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
                     Span::styled("Floating Point:   ", rvs_theme::MUTED),
                     Span::styled(format!("{:<8}", m.floats), rvs_theme::WARN_PLAIN),
                     Span::styled("Syscalls (ECALL): ", rvs_theme::MUTED),
-                    Span::styled(format!("{:<8}", m.ecalls), Style::default().fg(rvs_theme::MAUVE)),
+                    Span::styled(
+                        format!("{:<8}", m.ecalls),
+                        Style::default().fg(rvs_theme::MAUVE),
+                    ),
                 ]),
                 Line::raw(""),
                 Line::styled("Branch Prediction Statistics:", rvs_theme::INFO),
@@ -365,23 +421,47 @@ pub fn draw_modal<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
                     Span::styled("Branches Taken:   ", rvs_theme::MUTED),
                     Span::styled(format!("{:<8}", m.branches_taken), rvs_theme::OK_PLAIN),
                     Span::styled("Taken Rate:       ", rvs_theme::MUTED),
-                    Span::styled(format!("{:.1}%", m.taken_rate as f64 / 10.0), rvs_theme::HEADING),
+                    Span::styled(
+                        format!("{:.1}%", m.taken_rate as f64 / 10.0),
+                        rvs_theme::HEADING,
+                    ),
                 ]),
                 Line::raw(""),
                 Line::styled("Calling Convention Compliance Checker:", rvs_theme::INFO),
                 Line::from(vec![
                     Span::styled("  Checker Status:       ", rvs_theme::MUTED),
-                    Span::styled(if cc.enabled { "ENABLED (Active)" } else { "DISABLED" }, if cc.enabled { rvs_theme::OK } else { rvs_theme::MUTED }),
+                    Span::styled(
+                        if cc.enabled {
+                            "ENABLED (Active)"
+                        } else {
+                            "DISABLED"
+                        },
+                        if cc.enabled {
+                            rvs_theme::OK
+                        } else {
+                            rvs_theme::MUTED
+                        },
+                    ),
                     Span::styled("   Call Stack Depth: ", rvs_theme::MUTED),
                     Span::styled(format!("{:<4}", cc.depth), rvs_theme::TEXT_STYLE),
                     Span::styled("Violations: ", rvs_theme::MUTED),
-                    Span::styled(format!("{}", cc.violations.len()), if cc.violations.is_empty() { rvs_theme::OK_PLAIN } else { rvs_theme::ERR }),
+                    Span::styled(
+                        format!("{}", cc.violations.len()),
+                        if cc.violations.is_empty() {
+                            rvs_theme::OK_PLAIN
+                        } else {
+                            rvs_theme::ERR
+                        },
+                    ),
                 ]),
             ];
 
             if !cc.violations.is_empty() {
                 text.push(Line::raw(""));
-                text.push(Line::styled("  Recent Convention Violations:", rvs_theme::ERR));
+                text.push(Line::styled(
+                    "  Recent Convention Violations:",
+                    rvs_theme::ERR,
+                ));
                 for v in cc.violations.iter().rev().take(5) {
                     text.push(Line::styled(format!("    ! {v}"), rvs_theme::ERR_PLAIN));
                 }
@@ -391,7 +471,10 @@ pub fn draw_modal<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
             }
 
             text.push(Line::raw(""));
-            text.push(Line::styled("Press Esc or Enter to close.", rvs_theme::MUTED));
+            text.push(Line::styled(
+                "Press Esc or Enter to close.",
+                rvs_theme::MUTED,
+            ));
 
             f.render_widget(Paragraph::new(text).wrap(Wrap { trim: true }), inner);
         }
@@ -403,7 +486,10 @@ pub fn draw_modal<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
                 .style(rvs_theme::PANE)
                 .border_type(BorderType::Double)
                 .border_style(rvs_theme::INFO_PLAIN)
-                .title(Span::styled(" Call Stack & Stack Frame Visualizer (:stack) ", rvs_theme::HEADING));
+                .title(Span::styled(
+                    " Call Stack & Stack Frame Visualizer (:stack) ",
+                    rvs_theme::HEADING,
+                ));
             let inner = block.inner(modal_area);
             f.render_widget(block, modal_area);
 
@@ -417,7 +503,12 @@ pub fn draw_modal<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
                 Line::raw(""),
                 Line::from(vec![
                     Span::styled("  Current $sp: ", rvs_theme::SECONDARY),
-                    Span::styled(format!("0x{:016x}", cur_sp), Style::default().fg(rvs_theme::TEXT).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        format!("0x{:016x}", cur_sp),
+                        Style::default()
+                            .fg(rvs_theme::TEXT)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled("   Alignment: ", rvs_theme::SECONDARY),
                     if is_aligned {
                         Span::styled("16-byte ALIGNED ✓", rvs_theme::OK)
@@ -438,36 +529,68 @@ pub fn draw_modal<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
             } else {
                 for frame in frames.iter().rev() {
                     text.push(Line::from(vec![
-                        Span::styled(format!("  ┌ Frame {}: ", frame.depth), rvs_theme::INFO_PLAIN.add_modifier(Modifier::BOLD)),
-                        Span::styled(&frame.function_name, Style::default().fg(rvs_theme::TEXT).add_modifier(Modifier::BOLD)),
+                        Span::styled(
+                            format!("  ┌ Frame {}: ", frame.depth),
+                            rvs_theme::INFO_PLAIN.add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            &frame.function_name,
+                            Style::default()
+                                .fg(rvs_theme::TEXT)
+                                .add_modifier(Modifier::BOLD),
+                        ),
                         Span::styled(format!(" [0x{:x}]", frame.target_pc), rvs_theme::INFO_PLAIN),
                         Span::styled(" called from ", rvs_theme::MUTED),
-                        Span::styled(format!("{} (0x{:x})", frame.caller_name, frame.call_pc), Style::default().fg(rvs_theme::LAVENDER)),
+                        Span::styled(
+                            format!("{} (0x{:x})", frame.caller_name, frame.call_pc),
+                            Style::default().fg(rvs_theme::LAVENDER),
+                        ),
                     ]));
                     text.push(Line::styled(
-                        format!("  │   sp: 0x{:016x} → 0x{:016x} (size: {} bytes)", frame.frame_sp, frame.parent_sp, frame.frame_size),
+                        format!(
+                            "  │   sp: 0x{:016x} → 0x{:016x} (size: {} bytes)",
+                            frame.frame_sp, frame.parent_sp, frame.frame_size
+                        ),
                         rvs_theme::MUTED,
                     ));
 
                     if frame.slots.is_empty() {
-                        text.push(Line::styled("  │   (no double-words written to stack in this frame)", rvs_theme::MUTED));
+                        text.push(Line::styled(
+                            "  │   (no double-words written to stack in this frame)",
+                            rvs_theme::MUTED,
+                        ));
                     } else {
                         for slot in &frame.slots {
                             text.push(Line::from(vec![
                                 Span::styled("  │   ", rvs_theme::INFO_PLAIN),
-                                Span::styled(format!("0x{:016x}", slot.address), rvs_theme::INFO_PLAIN),
+                                Span::styled(
+                                    format!("0x{:016x}", slot.address),
+                                    rvs_theme::INFO_PLAIN,
+                                ),
                                 Span::styled(" : ", rvs_theme::FAINT),
-                                Span::styled(format!("0x{:016x}", slot.value), rvs_theme::TEXT_STYLE),
-                                Span::styled(format!("  ({})", slot.annotation), rvs_theme::OK_PLAIN),
+                                Span::styled(
+                                    format!("0x{:016x}", slot.value),
+                                    rvs_theme::TEXT_STYLE,
+                                ),
+                                Span::styled(
+                                    format!("  ({})", slot.annotation),
+                                    rvs_theme::OK_PLAIN,
+                                ),
                             ]));
                         }
                     }
-                    text.push(Line::styled("  └─────────────────────────────────────────────────────────────", rvs_theme::INFO_PLAIN));
+                    text.push(Line::styled(
+                        "  └─────────────────────────────────────────────────────────────",
+                        rvs_theme::INFO_PLAIN,
+                    ));
                 }
             }
 
             text.push(Line::raw(""));
-            text.push(Line::styled("Press Esc or Enter to close.", rvs_theme::MUTED));
+            text.push(Line::styled(
+                "Press Esc or Enter to close.",
+                rvs_theme::MUTED,
+            ));
 
             f.render_widget(Paragraph::new(text).wrap(Wrap { trim: true }), inner);
         }

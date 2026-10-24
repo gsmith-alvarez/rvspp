@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-use rvs_tcl as tcl;
 use rvs_sim::Simulator;
+use rvs_tcl as tcl;
 
 /// `memp`: the MEMORY pane text.
 pub fn format_memory(sim: &Simulator) -> String {
@@ -66,9 +66,9 @@ pub fn format_memory(sim: &Simulator) -> String {
         }
         if sim.view.mem_txt {
             line.push(' ');
-            line.push_str(&rvs_asm_syntax::render_line_f1(&rvs_asm_syntax::split_line(
-                &source_line,
-            )));
+            line.push_str(&rvs_asm_syntax::render_line_f1(
+                &rvs_asm_syntax::split_line(&source_line),
+            ));
         }
         res.push_str(&line);
         res.push('\n');
@@ -132,13 +132,55 @@ fn tcl_double_fallback(hex: &str) -> String {
     }
 }
 
+/// What a batch run did, for the CLI's exit status and the JSON sidecar.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BatchReport {
+    pub assembled: bool,
+    pub steps: u64,
+    pub timed_out: bool,
+    /// First execution error, if the run halted on one.
+    pub error: Option<String>,
+}
+
+impl BatchReport {
+    pub fn failed(&self) -> bool {
+        !self.assembled || self.error.is_some()
+    }
+}
+
+/// Options for a batch run. Defaults preserve the reference report exactly.
+#[derive(Clone, Debug, Default)]
+pub struct BatchOptions {
+    /// `None` = detect from the source.
+    pub dialect: Option<rvs_transpile::AssemblyDialect>,
+    /// Append the per-instruction trace (the reference always does).
+    pub trace: bool,
+    /// Optional machine-readable sidecar (`--json`).
+    pub json: Option<std::path::PathBuf>,
+    /// `ecall` convention: the course dialect (default) or a7.
+    pub abi: rvs_sim::EcallAbi,
+}
+
+impl BatchOptions {
+    /// Reference-equivalent defaults: trace on, dialect detected, no sidecar.
+    pub fn new() -> Self {
+        Self {
+            dialect: None,
+            trace: true,
+            json: None,
+            abi: rvs_sim::EcallAbi::Rvs,
+        }
+    }
+}
+
 /// `kkbatch`: compile, run with timeout, and write the exact report.
 pub fn run_batch_file(
     asm_path: &Path,
     in_path: &Path,
     out_path: &Path,
     timeout_ms: u64,
-) -> Result<(), String> {
+    opts: BatchOptions,
+) -> Result<BatchReport, String> {
     let stars = format!("\n{}\n", "*".repeat(57));
     let mut sim = Simulator::new();
     let mut data = String::new();
@@ -149,6 +191,11 @@ pub fn run_batch_file(
         Err(e) => return Err(format!("ERROR: {e}")),
     };
     sim.source = source.clone();
+    sim.dialect = opts
+        .dialect
+        .unwrap_or_else(|| rvs_transpile::detect_dialect(&source));
+    sim.trace = opts.trace;
+    sim.ecall_abi = opts.abi;
     data.push_str(&source);
 
     let input = match std::fs::read_to_string(in_path) {
@@ -160,6 +207,7 @@ pub fn run_batch_file(
     ));
 
     data.push_str(&format!("{stars}Compile{stars}"));
+    let mut asm_error: Option<String> = None;
     match rvs_assembler::assemble(&mut sim, &source) {
         Ok(listing) => {
             sim.listing = format!("{listing}\n");
@@ -170,6 +218,7 @@ pub fn run_batch_file(
                 .insert("START".to_string(), Simulator::START_DEFAULT.to_string());
             sim.regs.pc = tcl::parse_int(Simulator::START_DEFAULT).unwrap_or(0) as u64;
             sim.listing = format!("{}ERROR: {}\n\n", err.progress, err.message);
+            asm_error = Some(err.message);
         }
     }
     data.push_str(&sim.listing);
@@ -186,7 +235,7 @@ pub fn run_batch_file(
         .unwrap_or(0);
     sim.exec_log.push_str("START\n");
     sim.inp_prompt = false;
-    let _ = rvs_executor::run(&mut sim, timeout_ms);
+    let status = rvs_executor::run(&mut sim, timeout_ms);
     data.push_str(&sim.exec_log);
     data.push_str(&stars);
     data.push_str(&format_memory(&sim));
@@ -195,8 +244,97 @@ pub fn run_batch_file(
     data.push_str(&stars);
     data.push_str(&sim.output);
 
-    std::fs::write(out_path, data.as_bytes())
-        .map_err(|e| format!("ERROR: {e}"))
+    std::fs::write(out_path, data.as_bytes()).map_err(|e| format!("ERROR: {e}"))?;
+    let report = BatchReport {
+        assembled: asm_error.is_none(),
+        steps: sim.metrics.instructions,
+        timed_out: status == rvs_executor::RunStatus::TimedOut,
+        error: sim.last_error.clone().or(asm_error),
+    };
+    if let Some(path) = &opts.json {
+        write_json_report(path, &sim, &report, asm_path, timeout_ms)?;
+    }
+    Ok(report)
+}
+
+/// Escape a string for the JSON sidecar (no `serde` dependency).
+fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Machine-readable summary written by `rvs --json <path>`.
+///
+/// Deliberately a sidecar: the human report stays byte-identical to `kkbatch`,
+/// so the differential harness keeps its meaning.
+pub fn write_json_report(
+    path: &Path,
+    sim: &Simulator,
+    report: &BatchReport,
+    asm_path: &Path,
+    timeout_ms: u64,
+) -> Result<(), String> {
+    let mut out = String::new();
+    out.push_str("{\n");
+    out.push_str(&format!(
+        "  \"program\": \"{}\",\n",
+        json_escape(&asm_path.display().to_string())
+    ));
+    out.push_str(&format!("  \"assembled\": {},\n", report.assembled));
+    out.push_str(&format!("  \"steps\": {},\n", report.steps));
+    out.push_str(&format!("  \"timeout_ms\": {timeout_ms},\n"));
+    out.push_str(&format!("  \"timed_out\": {},\n", report.timed_out));
+    out.push_str(&format!(
+        "  \"error\": {},\n",
+        match &report.error {
+            Some(e) => format!("\"{}\"", json_escape(e)),
+            None => "null".to_string(),
+        }
+    ));
+    out.push_str(&format!("  \"cycles\": {},\n", sim.metrics.cycles));
+    out.push_str(&format!("  \"cpi\": {:.4},\n", sim.metrics.cpi()));
+    out.push_str(&format!(
+        "  \"output\": \"{}\",\n",
+        json_escape(&sim.output)
+    ));
+    out.push_str("  \"x\": [");
+    for i in 0..32u8 {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!("{}", sim.regs.read_x(i)));
+    }
+    out.push_str("],\n  \"f_bits\": [");
+    for i in 0..32u8 {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!("{}", sim.regs.read_f_bits(i)));
+    }
+    out.push_str("],\n  \"memory\": [");
+    let mut first = true;
+    for (addr, cell) in sim.mem.cells.iter() {
+        if let rvs_memory::MemoryCell::Data { value, .. } = cell {
+            if !first {
+                out.push(',');
+            }
+            out.push_str(&format!("[{addr},{value}]"));
+            first = false;
+        }
+    }
+    out.push_str("]\n}\n");
+    std::fs::write(path, out).map_err(|e| format!("ERROR: {e}"))
 }
 
 /// Formats a listing-relative view of the current (listing content is stored on the simulator itself).
@@ -234,4 +372,3 @@ mod tests {
         assert!(without_hex.contains("f0    0.0000000000000000E+00"));
     }
 }
-

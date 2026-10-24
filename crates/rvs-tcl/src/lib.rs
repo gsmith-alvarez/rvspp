@@ -185,10 +185,18 @@ pub fn tcl_double_to_string(v: f64) -> String {
         return "NaN".to_string();
     }
     if v.is_infinite() {
-        return if v > 0.0 { "Inf".to_string() } else { "-Inf".to_string() };
+        return if v > 0.0 {
+            "Inf".to_string()
+        } else {
+            "-Inf".to_string()
+        };
     }
     if v == 0.0 {
-        return if v.is_sign_negative() { "-0.0".to_string() } else { "0.0".to_string() };
+        return if v.is_sign_negative() {
+            "-0.0".to_string()
+        } else {
+            "0.0".to_string()
+        };
     }
     let neg = v < 0.0;
     let av = v.abs();
@@ -344,7 +352,7 @@ pub fn f2x(v: f64) -> String {
 pub fn x2f(x: &str) -> Option<f64> {
     let t = x.strip_prefix("0x").unwrap_or(x);
     let chars: Vec<char> = t.chars().collect();
-    if chars.len() < 16 || chars.len() % 2 != 0 {
+    if chars.len() < 16 || !chars.len().is_multiple_of(2) {
         return None;
     }
     let digits: String = chars[..16].iter().collect();
@@ -365,7 +373,10 @@ pub fn is_double(s: &str) -> bool {
 
 /// `string is alpha` (first char a letter).
 pub fn is_alpha_first(s: &str) -> bool {
-    s.chars().next().map(|c| c.is_ascii_alphabetic()).unwrap_or(false)
+    s.chars()
+        .next()
+        .map(|c| c.is_ascii_alphabetic())
+        .unwrap_or(false)
 }
 
 /// `string is wordchar` over the whole string (alphanumeric or `_`).
@@ -385,12 +396,13 @@ pub fn tcl_list_str(elements: &[String]) -> String {
     elements
         .iter()
         .map(|e| {
-            let needs = e.is_empty()
-                || e.chars()
-                    .any(|c| " \t\n\r{}[]\"\\$;".contains(c));
+            let needs = e.is_empty() || e.chars().any(|c| " \t\n\r{}[]\"\\$;".contains(c));
             if !needs {
                 e.clone()
-            } else if !e.contains('{') && !e.contains('}') && !e.contains('\\') && !e.contains('[')
+            } else if !e.contains('{')
+                && !e.contains('}')
+                && !e.contains('\\')
+                && !e.contains('[')
                 && !e.contains(']')
             {
                 format!("{{{e}}}")
@@ -451,7 +463,10 @@ mod tests {
         assert_eq!(tcl_double_to_string(1e-20), "1e-20");
         assert_eq!(tcl_double_to_string(0.1), "0.1");
         assert_eq!(tcl_double_to_string(1.0 / 3.0), "0.3333333333333333");
-        assert_eq!(tcl_double_to_string(123456789012345678.0), "1.2345678901234568e+17");
+        assert_eq!(
+            tcl_double_to_string(123456789012345678.0),
+            "1.2345678901234568e+17"
+        );
         assert_eq!(tcl_double_to_string(1e16), "10000000000000000.0");
         assert_eq!(tcl_double_to_string(1e15), "1000000000000000.0");
         assert_eq!(tcl_double_to_string(-0.0), "-0.0");
@@ -469,7 +484,10 @@ mod tests {
         assert_eq!(fmt_e24(2.0), Some("  2.0000000000000000E+00".to_string()));
         assert_eq!(fmt_e24(0.1), Some("  1.0000000000000001E-01".to_string()));
         assert_eq!(fmt_e24(-0.0), Some(" -0.0000000000000000E+00".to_string()));
-        assert_eq!(fmt_e24(f64::INFINITY), Some("                     INF".to_string()));
+        assert_eq!(
+            fmt_e24(f64::INFINITY),
+            Some("                     INF".to_string())
+        );
     }
 }
 

@@ -31,13 +31,75 @@ impl AssemblyDialect {
     }
 }
 
+/// Directives that only exist in GNU assembly (`.org` is excluded because the
+/// RVS dialect uses a bare `ORG`).
+const GNU_ONLY_DIRECTIVES: &[&str] = &[
+    ".text",
+    ".data",
+    ".bss",
+    ".rodata",
+    ".section",
+    ".globl",
+    ".global",
+    ".asciz",
+    ".string",
+    ".ascii",
+    ".word",
+    ".dword",
+    ".half",
+    ".byte",
+    ".float",
+    ".double",
+    ".zero",
+    ".space",
+    ".align",
+    ".balign",
+    ".p2align",
+    ".file",
+    ".ident",
+    ".type",
+    ".size",
+    ".option",
+    ".attribute",
+];
+
+/// Pseudo-instructions the RVS assembler does not know, so their presence
+/// means the file was written for GNU mode.
+const GNU_ONLY_PSEUDO: &[&str] = &[
+    "li", "la", "mv", "call", "tail", "ret", "jr", "nop", "not", "neg", "negw", "sext.w", "seqz",
+    "snez", "sltz", "sgtz", "beqz", "bnez", "blez", "bgez", "bltz", "bgtz", "bgt", "ble", "bgtu",
+    "bleu", "j",
+];
+
+/// Guess the dialect of a source file: any GNU-only directive or
+/// pseudo-instruction means GNU mode, otherwise the canonical RVS dialect.
+pub fn detect_dialect(source: &str) -> AssemblyDialect {
+    for line in source.lines() {
+        let (_, _, body, _) = parse_line_parts(line);
+        let mut words = body.split_whitespace();
+        let Some(op) = words.next() else { continue };
+        let lower = op.to_ascii_lowercase();
+        if GNU_ONLY_DIRECTIVES.contains(&lower.as_str()) {
+            return AssemblyDialect::Gnu;
+        }
+        // `jal`/`j` share the mnemonic across dialects; only the unambiguous
+        // pseudo-instructions are trustable.
+        if GNU_ONLY_PSEUDO.contains(&lower.as_str()) {
+            return AssemblyDialect::Gnu;
+        }
+    }
+    AssemblyDialect::Rvs
+}
+
 /// Splits a raw assembly line into:
 /// - `indent`: leading whitespace
 /// - `label`: optional label including colon (e.g. `main:`)
 /// - `body`: instruction / directive with arguments
 /// - `comment`: comment including comment character (e.g. `# ...`)
 pub fn parse_line_parts(raw: &str) -> (String, String, String, String) {
-    let indent_len = raw.chars().take_while(|c| c.is_whitespace()).count();
+    // Byte length, not char count: non-ASCII whitespace (U+00A0, U+2003, ...)
+    // is multi-byte, and slicing at a char index would split a code point.
+    let indent_len = raw.len() - raw.trim_start_matches(|c: char| c.is_whitespace()).len();
     let indent = raw[..indent_len].to_string();
     let trimmed = raw[indent_len..].trim_end();
 
@@ -53,7 +115,11 @@ pub fn parse_line_parts(raw: &str) -> (String, String, String, String) {
         let (byte_idx, ch) = chars[i];
         if ch == '"' {
             in_quote = !in_quote;
-        } else if !in_quote && (ch == '#' || ch == ';' || (ch == '/' && i + 1 < chars.len() && chars[i + 1].1 == '/')) {
+        } else if !in_quote
+            && (ch == '#'
+                || ch == ';'
+                || (ch == '/' && i + 1 < chars.len() && chars[i + 1].1 == '/'))
+        {
             comment_start = Some(byte_idx);
             break;
         }
@@ -213,7 +279,14 @@ pub fn transpile_gnu_to_rvs(source: &str) -> String {
                 ".zero" | ".space" => {
                     let n: i64 = args.first().and_then(|s| s.parse().ok()).unwrap_or(8);
                     let words = (n + 7) / 8;
-                    emit_line(&mut out, &indent, &label, "DM", &words.to_string(), &comment);
+                    emit_line(
+                        &mut out,
+                        &indent,
+                        &label,
+                        "DM",
+                        &words.to_string(),
+                        &comment,
+                    );
                     continue;
                 }
                 ".org" => {
@@ -445,7 +518,14 @@ pub fn transpile_rvs_to_gnu(source: &str) -> String {
             }
             "DM" => {
                 let words: i64 = args.first().and_then(|s| s.parse().ok()).unwrap_or(1);
-                emit_line(&mut out, &indent, &label, ".zero", &(words * 8).to_string(), &comment);
+                emit_line(
+                    &mut out,
+                    &indent,
+                    &label,
+                    ".zero",
+                    &(words * 8).to_string(),
+                    &comment,
+                );
                 continue;
             }
             "ORG" => {

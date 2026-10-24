@@ -12,10 +12,28 @@ The full "why" lives in the README under "Why We Built RVS++". Short version: th
 
 ## What We've Built (v1.0.0)
 
-### 1. Pure-Rust Core & 100% Autograder Compatibility
-- **No dependencies**: Replaced all Tcl/Tk requirements with a clean, standalone Rust application (RV64IMFD) that compiles into a single binary.
-- **Autograder parity**: Headless batch mode (`rvs --batch <asm> <in> <out>`) produces reports that match the original `kkbatch` autograder byte-for-byte. Your assignments evaluate identically.
-- **Works everywhere**: Runs natively on Linux, macOS, and Windows WSL, with both Cargo and Nix Flakes (`nix run .`) supported.
+### 1. Pure-Rust Core & Autograder Compatibility
+- **No runtime dependencies**: Replaced all Tcl/Tk requirements with a standalone Rust application that compiles into a single binary (no Tcl, Tk, X11, Java or browser).
+- **Autograder parity**: Headless batch mode (`rvs --batch <asm> <in> <out>`) produces reports that match the original `kkbatch` harness byte-for-byte on the bundled conformance fixtures (t1–t5, t7–t9; t6 exercises added instructions and is smoke-tested only). `tests/differential/run.sh` diffs against the Tcl reference.
+- **GNU files are gradeable too**: `--dialect auto|rvs|gnu` picks the dialect for batch; `auto` detects it from directives and pseudo-instructions.
+- **Works on the platforms we test**: Linux and macOS, via Cargo or Nix Flakes (`nix run .`). Windows is WSL only; the native Windows path is untested.
+
+### 1a. Hardening (v1.0.1)
+- **No panic on bad input**: an unencodable instruction (bad register, out-of-range immediate, wrong operand count) is reported in the listing and halts the run with `ERROR: <diagnostic>` instead of aborting the process. Covered by `crates/rvs-assembler/tests/robustness.rs`.
+- **Crash containment in the TUI**: a panic hook restores the terminal and the event loop catches unwinds per iteration, writing the editor buffer to `$XDG_DATA_HOME/rvs/recovery-<ts>.s`.
+- **Assembler diagnostics fixed**: the out-of-range immediate message was missing its comma (`[-20484095]`); `fsqrt.d`/`fcvt`/`fmv` (2-operand F2 forms) no longer fail encoding.
+- **Unicode-safe transpiler**: lines starting with multi-byte whitespace (U+00A0, U+2003) no longer panic on a char/byte boundary slice.
+- **`ld` of negative values** no longer overflows a shift mask in debug builds.
+
+### 1b. Debugger depth (v1.1.0)
+- **Step over / step out**: `:next` runs a call and stops at its return address; `:finish` runs until the current frame returns. Both reuse the breakpoint machinery (temporary address + removal).
+- **Conditional breakpoints**: `:b loop if x1 == 3` — expressions are expanded with live register values, then evaluated with the Tcl `expr` semantics the assembler already uses for operands.
+- **Watchpoints**: `:watch sp|addr|label` stops continuous execution when that cell's value changes; `:cwatch` clears them.
+- **Search**: `/` prompts for a pattern (`n`/`N` are taken by stepping, so repeat is `Ctrl+N`/`Ctrl+P`), plus `:search <pattern>`. Motions accept counts (`3j`, `4w`, `5x`).
+- **Reverse stepping is now O(1)**: snapshots record registers plus a mark into a memory undo journal instead of cloning memory and the trace. 20k stepped instructions went from 2.6 s to 7 ms; 500k steps rewind in ~100 ms. The journal is trimmed as history rolls over, so memory stays bounded.
+- **`a7` syscall ABI**: `--abi a7` / `:abi a7` makes `ecall` behave like RARS/GNU (1 print int, 4 print string, 5 read int, 8 read string, 9 sbrk, 10/17/93 exit, 11 print char, 34 print hex), so a real GNU-style program prints and exits instead of running to the timeout.
+- **Batch flags that do not touch parity**: `--no-trace` (10M-instruction loop: 12 s / 800 MB → 3 s / 6 KB), `--json PATH` sidecar, `--fail-on-error` (exit 2).
+- **CI**: `.github/workflows/ci.yml` runs three blocking jobs — `lint` (rustfmt + clippy `-D warnings`), `test` on Linux and macOS (release-mode build so every crate and binary must link, then the suite), and `parity` (Tcl harness with apt tcl/tk/xvfb instead of Nix). `.github/workflows/release.yml` builds tagged musl/macOS binaries. The tree was reformatted with rustfmt and every clippy warning fixed to make the lint gate meaningful.
 
 ### 2. Clean Process Teardown (No Zombie Spinners)
 - **The problem**: In early TUI builds, closing the terminal tab or window caused event loops to spin infinitely on EOF (`read(0) == 0`), quietly eating 100% CPU in the background.
@@ -46,10 +64,23 @@ The full "why" lives in the README under "Why We Built RVS++". Short version: th
 - Shows function names, call sites, frame boundaries, and parses double-word stack slots to tell you exactly where your saved return address (`Saved ra`) and callee-saved registers are stored in memory.
 
 ### 8. Standard GNU Mode & Two-Way Transpiler (`:mode`, `:transpile`)
-- **Dialect toggle**: Switch between strict educational RVS syntax and standard GNU assembly (`:mode gnu`). GNU mode lets you compile standard directives (`.word`, `.dword`, `.asciz`, `.zero`) and 25+ pseudo-instructions (`li`, `mv`, `ret`, `call`, `j`, `nop`, `beqz`, `bgt`, etc.) directly.
+- **Dialect toggle**: Switch between strict educational RVS syntax and GNU *syntactic* style (`:mode gnu`). GNU mode translates standard directives (`.word`, `.dword`, `.asciz`, `.zero`) and 25+ pseudo-instructions (`li`, `mv`, `ret`, `call`, `j`, `nop`, `beqz`, `bgt`, etc.) into the RVS dialect. It does not change the runtime ABI: `ecall` still uses `rd, rs1, imm` (no `a7` dispatch), numeric branch operands are still absolute targets, and there is no libc or linker.
 - **Two-way transpiler**: Click `[TRANSPILE]` or run `:transpile rvs` to expand pseudo-ops into canonical 3-operand code for homework submissions, or `:transpile gnu` to tidy canonical code back into clean GNU syntax.
 
 ---
+
+## Known Limitations (as of v1.1.0)
+
+These are deliberate or accepted, and they define the project's scope:
+
+- **The dialect is not standard RISC-V.** Branch operands are absolute targets, memory is a sparse map of 8-byte cells, syscalls are `ecall rd, rs1, imm` (0–9) and ignore `a7`. Code written for a real toolchain will assemble and then behave differently.
+- **Instruction cells execute from parsed operands**; the encoded 32-bit word in the listing is display-only and never decoded.
+- **Unsupported ISA surface**: A (atomics), C (compressed), CSR semantics (`csrrw`/`csrrs`/… encode but are rejected at execution), `fence`/`fence.i`, traps, exceptions, privilege modes, paging, interrupts, timers, multiple harts.
+- **No toolchain integration**: no ELF/relocations/linker, no `.include` or macros, no C or DWARF debugging, one file at a time.
+- **GNU mode is syntax-level**: directives and pseudo-instructions are translated, but `ecall` keeps RVS semantics unless `--abi a7` is selected, numeric branch operands are absolute, and there is no libc or linker.
+- **The `a7` ABI covers ten syscalls** (1, 4, 5, 8, 9, 10, 11, 17, 34, 93) — no allocator beyond `sbrk`, no file or environment syscalls.
+- **Batch throughput is trace-bound** (≈0.8M instructions/s with the trace on, 800 MB for 10M instructions); `--no-trace` is 4× faster and 100k× smaller, but then the `Run` section is empty by design.
+- **No published crates, no coverage tooling.** CI exists (tests + parity + release builds) but is unproven until it runs on GitHub.
 
 ## Future Ideas (Under Consideration)
 
