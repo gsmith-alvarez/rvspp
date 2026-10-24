@@ -1483,17 +1483,9 @@ name = "rvs-app"
 version = "1.0.0"
 dependencies = [
  "ratatui",
- "rvs-assembler",
- "rvs-ecall",
  "rvs-editor",
- "rvs-executor",
  "rvs-explorer",
- "rvs-format",
- "rvs-memory",
- "rvs-regs",
- "rvs-sim",
- "rvs-tcl",
- "rvs-transpile",
+ "rvs-machine",
  "shell-words",
 ]
 
@@ -1505,8 +1497,7 @@ dependencies = [
  "ratatui",
  "rvs-app",
  "rvs-explorer",
- "rvs-tcl",
- "rvs-transpile",
+ "rvs-machine",
  "shell-words",
  "tempfile",
 ]
@@ -1520,6 +1511,7 @@ dependencies = [
  "rvs-app-cmds",
  "rvs-editor",
  "rvs-explorer",
+ "rvs-machine",
 ]
 
 [[package]]
@@ -1607,6 +1599,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "rvs-machine"
+version = "1.0.0"
+dependencies = [
+ "unicode-segmentation",
+ "unicode-width",
+]
+
+[[package]]
+name = "rvs-machine-riscv"
+version = "1.0.0"
+dependencies = [
+ "rvs-asm-syntax",
+ "rvs-assembler",
+ "rvs-ecall",
+ "rvs-executor",
+ "rvs-format",
+ "rvs-machine",
+ "rvs-memory",
+ "rvs-regs",
+ "rvs-sim",
+ "rvs-syntax",
+ "rvs-tcl",
+ "rvs-transpile",
+]
+
+[[package]]
 name = "rvs-memory"
 version = "1.0.0"
 dependencies = [
@@ -1631,10 +1649,9 @@ dependencies = [
 name = "rvs-syntax"
 version = "1.0.0"
 dependencies = [
- "ratatui",
  "rvs-asm-syntax",
+ "rvs-machine",
  "rvs-regs",
- "rvs-theme",
 ]
 
 [[package]]
@@ -1649,6 +1666,7 @@ name = "rvs-theme"
 version = "1.0.0"
 dependencies = [
  "ratatui",
+ "rvs-machine",
 ]
 
 [[package]]
@@ -1668,11 +1686,10 @@ dependencies = [
  "rvs-app-cmds",
  "rvs-app-keys",
  "rvs-explorer",
- "rvs-format",
+ "rvs-machine",
+ "rvs-machine-riscv",
  "rvs-theme",
- "rvs-transpile",
  "rvs-ui",
- "rvs-ui-panes",
  "signal-hook",
 ]
 
@@ -1684,6 +1701,7 @@ dependencies = [
  "ratatui",
  "rvs-app",
  "rvs-app-cmds",
+ "rvs-machine",
  "rvs-theme",
  "rvs-ui-modal",
  "rvs-ui-panes",
@@ -1696,8 +1714,8 @@ dependencies = [
  "ratatui",
  "rvs-app",
  "rvs-explorer",
+ "rvs-machine",
  "rvs-theme",
- "rvs-ui-panes",
 ]
 
 [[package]]
@@ -1706,16 +1724,8 @@ version = "1.0.0"
 dependencies = [
  "ratatui",
  "rvs-app",
- "rvs-asm-syntax",
- "rvs-assembler",
- "rvs-format",
- "rvs-memory",
- "rvs-syntax",
- "rvs-tcl",
+ "rvs-machine",
  "rvs-theme",
- "rvs-transpile",
- "unicode-segmentation",
- "unicode-width",
 ]
 
 [[package]]

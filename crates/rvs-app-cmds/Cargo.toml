@@ -8,8 +8,7 @@ authors.workspace = true
 [dependencies]
 rvs-app = { path = "../rvs-app" }
 rvs-explorer = { path = "../rvs-explorer" }
-rvs-tcl = { path = "../rvs-tcl" }
-rvs-transpile = { path = "../rvs-transpile" }
+rvs-machine = { path = "../rvs-machine" }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
 shell-words = { workspace = true }

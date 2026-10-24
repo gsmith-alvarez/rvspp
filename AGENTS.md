@@ -8,7 +8,7 @@ Hard invariant: the batch report (`rvs --batch ...`) must remain **byte-for-byte
 
 ## Architecture & Data Flow
 
-The workspace is 22 small crates; each crate owns one concern and is a single `src/lib.rs` (except `rvs-tui`, which also has binaries).
+The workspace is 24 small crates; each crate owns one concern and is a single `src/lib.rs` (except `rvs-tui`, which also has binaries).
 
 ```text
 Engine (UI-independent):
@@ -23,21 +23,25 @@ Engine (UI-independent):
   rvs-executor        -> sim, fpu, ecall, asm-syntax, ...
   rvs-format          -> sim, executor, assembler, ...   reports + batch runner
 
-TUI (depends on engine, never the reverse):
-  rvs-theme                              palette + semantic styles
-  rvs-editor, rvs-explorer, rvs-syntax        UI leaves
-  rvs-app             -> engine + editor/explorer
-  rvs-app-cmds        -> app, explorer, tcl, shell-words, tempfile
+Workbench seam (the template boundary):
+  rvs-machine                            Machine trait, ViewState, Tone (no engine deps)
+  rvs-machine-riscv   -> engine, syntax  RV64IMFD backend implementing Machine
+
+TUI (depends on rvs-machine only, never on engine crates):
+  rvs-theme, rvs-editor, rvs-explorer        leaves
+  rvs-syntax          -> asm-syntax, regs    RISC-V token classifier (backend-side)
+  rvs-app             -> machine, editor, explorer
+  rvs-app-cmds        -> app, explorer, shell-words, tempfile
   rvs-app-keys        -> app, app-cmds, crossterm
-  rvs-ui-panes, rvs-ui-modal, rvs-ui          rendering
-  rvs-tui             -> app, app-keys, app-cmds, ui, format; binaries + event loop
+  rvs-ui-panes, rvs-ui-modal, rvs-ui          rendering (ViewState -> ratatui)
+  rvs-tui             -> app, app-keys, app-cmds, ui, machine-riscv; binaries + event loop
 ```
 
 Edges above are abbreviated; each crate's `Cargo.toml` is authoritative.
 
 Engine flow: `assemble(&mut Simulator, &str)` populates `sim.mem`, `sim.sym` and the listing → `step(&mut Simulator)` / `run(&mut Simulator, timeout_ms)` mutate registers/memory/logs → `format_memory`, `format_registers` and `run_batch_file` emit reports.
 
-TUI flow: `App` owns all UI state (`sim: Simulator`, `editor: Editor`, focus, mode, scroll offsets, modal state). `App::on_key` dispatches; `:` commands run through the `AppCommands` trait; `rvs_ui::draw` renders; the event loop (plus signal/HUP handling) lives in `rvs-tui/src/lib.rs`.
+TUI flow: `App<M: Machine>` owns UI state (`machine: M`, `editor: Editor`, focus, mode, scroll offsets, modal state) and asks `M::view()` for renderable state. A backend can be swapped without touching `rvs-app`, `rvs-ui*` or `rvs-tui`. `App::on_key` dispatches; `:` commands run through the `AppCommands` trait; `rvs_ui::draw` renders; the event loop (plus signal/HUP handling) lives in `rvs-tui/src/lib.rs`.
 
 ## Key Directories
 
@@ -55,7 +59,7 @@ TUI flow: `App` owns all UI state (`sim: Simulator`, `editor: Editor`, focus, mo
 
 ```bash
 cargo check --workspace                 # fast type check
-cargo test --workspace                  # full suite (63 tests)
+cargo test --workspace                  # full suite (64 tests)
 cargo clippy --workspace --all-targets  # default lints (no clippy.toml)
 cargo fmt --check                       # default rustfmt (no rustfmt.toml)
 
@@ -77,6 +81,7 @@ Project-wide rules (hard requirements):
 - **No first-party crate may exceed 1000 lines.** Split by responsibility and add the new crate to the root `Cargo.toml` members.
 - **No re-exports.** Zero `pub use` / `pub(crate) use`; callers import from the defining crate (`use rvs_tcl;`, `rvs_sim::Simulator`). Private `use rvs_tcl as tcl;` aliases are fine — they are imports, not re-exports.
 - **No `#[path = "..."]` and no `include!`.**
+- **Machine seam**: UI crates (`rvs-app`, `rvs-app-*`, `rvs-ui*`, `rvs-tui`) must not import engine crates. Target knowledge enters through `rvs_machine::Machine`; only `rvs-machine-riscv` may depend on the engine and `rvs-syntax`.
 
 Patterns to follow:
 
@@ -117,7 +122,7 @@ Patterns to follow:
 
 ## Testing & QA
 
-- **63 tests**: inline unit tests per crate, `proptest` properties (`rvs-editor` grapheme cursor, `rvs-tcl` integer/hex round-trips), 5 full-ISA integration tests, and 16 headless TUI tests (one of which is an insta frame snapshot).
+- **64 tests**: inline unit tests per crate, `proptest` properties (`rvs-editor` grapheme cursor, `rvs-tcl` integer/hex round-trips), 5 full-ISA integration tests, and 16 headless TUI tests (one of which is an insta frame snapshot).
 - **TUI tests** use `ratatui::backend::TestBackend`, `App::new(None)`, helpers `key`/`char_key`/`ctrl`/`type_str`, and assert on `app` state plus `terminal.backend().to_string()`. Render with `terminal.draw(|f| ui::draw(f, &mut app))`.
 - **Snapshot updates**: `INSTA_UPDATE=always cargo test -p rvs-tui --test tui_smoke test_initial_frame_snapshot`, then review `crates/rvs-tui/tests/snapshots/`.
 - **Parity gate**: after touching `rvs-tcl`, `rvs-asm-syntax`, `rvs-assembler`, `rvs-executor`, `rvs-fpu`, `rvs-ecall` or `rvs-format`, run `bash tests/differential/run.sh` (t1–t5, t7–t9 must diff clean; t6 is smoke-only).

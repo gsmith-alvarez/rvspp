@@ -8,6 +8,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 use rvs_app::{App, Modal, Mode, Pane};
+use rvs_machine::Machine;
 use rvs_app_cmds::AppCommands;
 use rvs_ui_modal::{centered_rect, draw_modal};
 use rvs_ui_panes::{
@@ -112,32 +113,33 @@ pub fn compute_layout(area: Rect) -> LayoutAreas {
     }
 }
 
-pub fn draw(f: &mut Frame, app: &mut App) {
+pub fn draw<M: Machine>(f: &mut Frame, app: &mut App<M>) {
     let area = f.area();
     app.last_area = area;
     // Paint the whole frame first so no widget leaks the terminal background.
     f.render_widget(Block::default().style(rvs_theme::PANE), area);
     let l = compute_layout(area);
+    let view = app.machine.view(&app.view_request());
     draw_top_bar(f, app, l.top);
 
     if let Some(pane) = app.zoomed_pane {
         match pane {
             Pane::Source => draw_source(f, app, l.middle),
-            Pane::Listing => draw_listing(f, app, l.middle),
-            Pane::Regs => draw_regs(f, app, l.middle),
-            Pane::Mem => draw_mem(f, app, l.middle),
-            Pane::Exec => draw_exec(f, app, l.middle),
-            Pane::Out => draw_out(f, app, l.middle),
-            Pane::Inp => draw_inp(f, app, l.middle),
+            Pane::Listing => draw_listing(f, app, &view, l.middle),
+            Pane::Regs => draw_regs(f, app, &view, l.middle),
+            Pane::Mem => draw_mem(f, app, &view, l.middle),
+            Pane::Exec => draw_exec(f, app, &view, l.middle),
+            Pane::Out => draw_out(f, app, &view, l.middle),
+            Pane::Inp => draw_inp(f, app, &view, l.middle),
         }
     } else {
         draw_source(f, app, l.source);
-        draw_listing(f, app, l.listing);
-        draw_regs(f, app, l.regs);
-        draw_mem(f, app, l.mem);
-        draw_exec(f, app, l.exec);
-        draw_out(f, app, l.out);
-        draw_inp(f, app, l.inp);
+        draw_listing(f, app, &view, l.listing);
+        draw_regs(f, app, &view, l.regs);
+        draw_mem(f, app, &view, l.mem);
+        draw_exec(f, app, &view, l.exec);
+        draw_out(f, app, &view, l.out);
+        draw_inp(f, app, &view, l.inp);
     }
 
     draw_bottom_bar(f, app, l.bottom);
@@ -147,7 +149,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
 }
 
-fn draw_top_bar(f: &mut Frame, app: &App, area: Rect) {
+fn draw_top_bar<M: Machine>(f: &mut Frame, app: &App<M>, area: Rect) {
     f.render_widget(Block::default().style(rvs_theme::BAR), area);
     let modified = if app.editor.needs_save() { "[*]" } else { "" };
     let fname = if app.fname.is_empty() {
@@ -200,7 +202,7 @@ fn draw_top_bar(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Paragraph::new(line), area);
 }
 
-fn draw_bottom_bar(f: &mut Frame, app: &App, area: Rect) {
+fn draw_bottom_bar<M: Machine>(f: &mut Frame, app: &App<M>, area: Rect) {
     f.render_widget(Block::default().style(rvs_theme::BAR), area);
     if app.mode == Mode::Command {
         let line = Line::from(vec![
@@ -230,7 +232,7 @@ fn draw_bottom_bar(f: &mut Frame, app: &App, area: Rect) {
 }
 
 
-pub fn handle_click(app: &mut App, col: u16, row: u16) {
+pub fn handle_click<M: Machine>(app: &mut App<M>, col: u16, row: u16) {
     if let Modal::FilePrompt(_) = app.modal {
         let modal_area = centered_rect(84, 82, app.last_area);
         let inner = Block::default().borders(Borders::ALL).inner(modal_area);
@@ -349,7 +351,7 @@ pub fn handle_click(app: &mut App, col: u16, row: u16) {
     }
 }
 
-pub fn handle_scroll(app: &mut App, col: u16, row: u16, delta: i32) {
+pub fn handle_scroll<M: Machine>(app: &mut App<M>, col: u16, row: u16, delta: i32) {
     if let Modal::FilePrompt(_) = app.modal {
         let modal_area = centered_rect(84, 82, app.last_area);
         let inner = Block::default().borders(Borders::ALL).inner(modal_area);
@@ -387,7 +389,7 @@ pub fn handle_scroll(app: &mut App, col: u16, row: u16, delta: i32) {
 }
 
 
-    pub fn handle_mouse(app: &mut App, mouse: MouseEvent) {
+    pub fn handle_mouse<M: Machine>(app: &mut App<M>, mouse: MouseEvent) {
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 handle_click(app, mouse.column, mouse.row);
@@ -398,3 +400,90 @@ pub fn handle_scroll(app: &mut App, col: u16, row: u16, delta: i32) {
         }
     }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    use rvs_machine::{
+        Dialect, LoadOutcome, Machine, RegisterChanges, RichLine, Segment, StepOutcome,
+        ViewRequest, ViewState,
+    };
+
+    #[derive(Clone)]
+    struct MockSnapshot;
+
+    /// A machine with no RISC-V dependency at all: proves the UI stays generic.
+    struct MockMachine;
+
+    impl Machine for MockMachine {
+        type Snapshot = MockSnapshot;
+
+        fn new() -> Self {
+            MockMachine
+        }
+        fn load(&mut self, _source: &str) -> LoadOutcome {
+            LoadOutcome::Ok
+        }
+        fn reset(&mut self) {}
+        fn start(&mut self) {}
+        fn step(&mut self) -> StepOutcome {
+            StepOutcome::Halted
+        }
+        fn request_stop(&mut self) {}
+        fn stop_requested(&self) -> bool {
+            false
+        }
+        fn clear_stop_request(&mut self) {}
+        fn snapshot(&self) -> MockSnapshot {
+            MockSnapshot
+        }
+        fn restore(&mut self, _snapshot: &MockSnapshot) {}
+        fn changes_since(&self, _snapshot: &MockSnapshot) -> RegisterChanges {
+            RegisterChanges::default()
+        }
+        fn view(&self, request: &ViewRequest) -> ViewState {
+            ViewState {
+                listing: vec![RichLine::plain("mocked-listing")],
+                registers: vec![RichLine::plain("mocked-reg")],
+                memory: vec![RichLine::plain("mocked-mem")],
+                exec: vec![RichLine::plain("mocked-log")],
+                output: vec![RichLine::plain("mocked-out")],
+                prompt: None,
+                dialect: Dialect::Rvs,
+                dma_out_available: false,
+                dma_inp_available: false,
+                pc: request.pc,
+            }
+        }
+        fn highlight_source_line(&self, line: &str) -> Vec<Segment> {
+            vec![Segment::plain(line)]
+        }
+        fn dialect(&self) -> Dialect {
+            Dialect::Rvs
+        }
+        fn pc(&self) -> u64 {
+            0
+        }
+        fn reset_pc(&mut self) {}
+        fn submit_input(&mut self, _value: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn cancel_input(&mut self) {}
+    }
+
+    #[test]
+    fn renders_a_non_riscv_machine_through_the_neutral_view_model() {
+        let backend = TestBackend::new(120, 36);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::<MockMachine>::new(None);
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let frame = terminal.backend().to_string();
+        assert!(frame.contains("mocked-listing"));
+        assert!(frame.contains("mocked-reg"));
+        assert!(frame.contains("mocked-mem"));
+        assert!(frame.contains("mocked-log"));
+        assert!(frame.contains("mocked-out"));
+    }
+}

@@ -7,7 +7,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use rvs_app::{App, ConfirmAction, FileAction, Modal, Mode, Pane, RunSpeed};
-use rvs_tcl as tcl;
+use rvs_machine::{Dialect, Machine};
 
 pub trait AppCommands {
     fn on_key_command(&mut self, key: KeyEvent);
@@ -48,7 +48,7 @@ fn split_command(spec: &str) -> Vec<String> {
     }
 }
 
-impl AppCommands for App {
+impl<M: Machine> AppCommands for App<M> {
     fn on_key_command(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => {
@@ -146,8 +146,7 @@ impl AppCommands for App {
             "stop" | "halt" => self.action_stop(),
             "reset" | "initpc" => self.reset_pc(),
             "clear" => {
-                self.sim.exec_log.clear();
-                self.sim.output.clear();
+                self.machine.clear_logs();
                 self.scroll_exec = 0;
                 self.scroll_out = 0;
                 self.needs_full_clear = true;
@@ -184,11 +183,10 @@ impl AppCommands for App {
                 } else if let Ok(line_num) = args.parse::<usize>() {
                     let line_idx = line_num.saturating_sub(1);
                     self.toggle_breakpoint_at_source_line(line_idx);
-                } else if let Some(addr_str) = self.sim.sym.get(args) {
-                    let addr = tcl::parse_int(addr_str).unwrap_or(0) as u64;
+                } else if let Some(addr) = self.machine.symbol_address(args) {
                     self.toggle_breakpoint(addr);
-                } else if let Some(addr) = tcl::parse_int(args) {
-                    self.toggle_breakpoint(addr as u64);
+                } else if let Some(addr) = rvs_machine::parse_u64(args) {
+                    self.toggle_breakpoint(addr);
                 } else {
                     self.status = format!("ERROR: Invalid address, line number, or label \"{args}\"");
                 }
@@ -202,15 +200,16 @@ impl AppCommands for App {
             }
             "cc" | "convention" => {
                 if args == "on" {
-                    self.sim.convention.enabled = true;
+                    self.machine.set_convention_enabled(true);
                 } else if args == "off" {
-                    self.sim.convention.enabled = false;
+                    self.machine.set_convention_enabled(false);
                 } else {
-                    self.sim.convention.enabled = !self.sim.convention.enabled;
+                    let next = !self.machine.convention_enabled();
+                    self.machine.set_convention_enabled(next);
                 }
                 self.status = format!(
                     "Calling convention checker: {}",
-                    if self.sim.convention.enabled { "ON" } else { "OFF" }
+                    if self.machine.convention_enabled() { "ON" } else { "OFF" }
                 );
                 self.needs_full_clear = true;
             }
@@ -231,11 +230,10 @@ impl AppCommands for App {
             "mem" | "memory" => {
                 if args == "sp" || args == "stack" {
                     self.jump_mem_to_sp();
-                } else if let Some(addr_str) = self.sim.sym.get(args) {
-                    let addr = tcl::parse_int(addr_str).unwrap_or(0) as u64;
+                } else if let Some(addr) = self.machine.symbol_address(args) {
                     self.jump_mem_to_address(addr);
-                } else if let Some(addr) = tcl::parse_int(args) {
-                    self.jump_mem_to_address(addr as u64);
+                } else if let Some(addr) = rvs_machine::parse_u64(args) {
+                    self.jump_mem_to_address(addr);
                 } else if args.is_empty() {
                     self.jump_mem_to_address(0);
                 } else {
@@ -244,25 +242,25 @@ impl AppCommands for App {
             }
             "mode" | "dialect" => {
                 match args.to_lowercase().as_str() {
-                    "gnu" => self.sim.dialect = rvs_transpile::AssemblyDialect::Gnu,
-                    "rvs" | "dialect" => self.sim.dialect = rvs_transpile::AssemblyDialect::Rvs,
-                    "" => self.sim.dialect = self.sim.dialect.toggle(),
+                    "gnu" => self.machine.set_dialect(Dialect::Gnu),
+                    "rvs" | "dialect" => self.machine.set_dialect(Dialect::Rvs),
+                    "" => self.machine.set_dialect(self.machine.dialect().toggle()),
                     _ => self.status = format!("ERROR: Expected mode 'gnu' or 'rvs', got \"{args}\""),
                 }
-                self.status = format!("Assembly dialect: {}", self.sim.dialect.name());
+                self.status = format!("Assembly dialect: {}", self.machine.dialect().name());
                 self.needs_full_clear = true;
             }
             "transpile" | "tp" => {
                 let target = args.to_lowercase();
                 let src = self.editor.text();
-                let is_gnu_target = target == "gnu" || (target.is_empty() && self.sim.dialect == rvs_transpile::AssemblyDialect::Rvs);
-                let transpiled = if is_gnu_target {
-                    rvs_transpile::transpile_rvs_to_gnu(&src)
-                } else {
-                    rvs_transpile::transpile_gnu_to_rvs(&src)
-                };
-                self.editor.replace_text(&transpiled);
-                self.status = format!("Transpiled buffer to {} format", if is_gnu_target { "GNU" } else { "RVS" });
+                let is_gnu_target = target == "gnu"
+                    || (target.is_empty()
+                        && self.machine.dialect() == Dialect::Rvs);
+                let target = if is_gnu_target { Dialect::Gnu } else { Dialect::Rvs };
+                if let Some(transpiled) = self.machine.transpile(&src, target) {
+                    self.editor.replace_text(&transpiled);
+                }
+                self.status = format!("Transpiled buffer to {} format", target.name());
                 self.needs_full_clear = true;
             }
             "stack" | "callstack" | "frames" => {
@@ -334,11 +332,11 @@ impl AppCommands for App {
                 self.editor.row = self.editor.lines.len().saturating_sub(1);
                 self.editor.clamp_cursor();
             }
-            Pane::Listing => self.scroll_listing = (self.sim.listing.lines().count() + 4).saturating_sub(1),
+            Pane::Listing => self.scroll_listing = (self.machine.listing_len() + 4).saturating_sub(1),
             Pane::Regs => self.scroll_regs = 64,
-            Pane::Mem => self.scroll_mem = self.sim.mem.cells.len() + 2,
-            Pane::Exec => self.scroll_exec = self.sim.exec_log.lines().count().saturating_sub(1),
-            Pane::Out => self.scroll_out = self.sim.output.lines().count().saturating_sub(1),
+            Pane::Mem => self.scroll_mem = self.machine.memory_len() + 2,
+            Pane::Exec => self.scroll_exec = self.machine.exec_len().saturating_sub(1),
+            Pane::Out => self.scroll_out = self.machine.output_len().saturating_sub(1),
             Pane::Inp => {}
         }
     }
@@ -348,11 +346,11 @@ impl AppCommands for App {
     fn scroll_pane(&mut self, pane: Pane, delta: i32) {
         let (len, off) = match pane {
             Pane::Source => (self.editor.lines.len(), &mut self.editor.offset_row),
-            Pane::Listing => (self.sim.listing.lines().count() + 4, &mut self.scroll_listing),
+            Pane::Listing => (self.machine.listing_len() + 4, &mut self.scroll_listing),
             Pane::Regs => (64, &mut self.scroll_regs),
-            Pane::Mem => (self.sim.mem.cells.len() + 2, &mut self.scroll_mem),
-            Pane::Exec => (self.sim.exec_log.lines().count(), &mut self.scroll_exec),
-            Pane::Out => (self.sim.output.lines().count(), &mut self.scroll_out),
+            Pane::Mem => (self.machine.memory_len() + 2, &mut self.scroll_mem),
+            Pane::Exec => (self.machine.exec_len(), &mut self.scroll_exec),
+            Pane::Out => (self.machine.output_len(), &mut self.scroll_out),
             Pane::Inp => return,
         };
         if delta < 0 {
@@ -363,20 +361,20 @@ impl AppCommands for App {
     }
     fn toggle_pane_option(&mut self, pane: Pane, slot: u8) {
         match (pane, slot) {
-            (Pane::Listing, 1) => self.sim.view.exec_txt = !self.sim.view.exec_txt,
+            (Pane::Listing, 1) => self.view.exec_txt = !self.view.exec_txt,
             (Pane::Listing, 2) => self.colorize_listing = !self.colorize_listing,
             (Pane::Listing, 3) => {
                 self.run_speed = self.run_speed.next();
                 self.status = format!("Run speed: {}", self.run_speed.label());
             }
             (Pane::Listing, 4) => self.toggle_breakpoint_at_pc(),
-            (Pane::Regs, 1) => self.sim.view.reg_hex = !self.sim.view.reg_hex,
-            (Pane::Regs, 2) => self.sim.view.reg_int = !self.sim.view.reg_int,
-            (Pane::Regs, 3) => self.sim.view.reg_flp = !self.sim.view.reg_flp,
-            (Pane::Mem, 1) => self.sim.view.mem_hex = !self.sim.view.mem_hex,
-            (Pane::Mem, 2) => self.sim.view.mem_int = !self.sim.view.mem_int,
-            (Pane::Mem, 3) => self.sim.view.mem_flp = !self.sim.view.mem_flp,
-            (Pane::Mem, 4) => self.sim.view.mem_txt = !self.sim.view.mem_txt,
+            (Pane::Regs, 1) => self.view.reg_hex = !self.view.reg_hex,
+            (Pane::Regs, 2) => self.view.reg_int = !self.view.reg_int,
+            (Pane::Regs, 3) => self.view.reg_flp = !self.view.reg_flp,
+            (Pane::Mem, 1) => self.view.mem_hex = !self.view.mem_hex,
+            (Pane::Mem, 2) => self.view.mem_int = !self.view.mem_int,
+            (Pane::Mem, 3) => self.view.mem_flp = !self.view.mem_flp,
+            (Pane::Mem, 4) => self.view.mem_txt = !self.view.mem_txt,
             (Pane::Mem, 5) => self.jump_mem_to_sp(),
             (Pane::Mem, 6) => self.jump_mem_to_address(0),
             (Pane::Mem, 7) => {
@@ -385,14 +383,14 @@ impl AppCommands for App {
             }
             (Pane::Out, 1 | 5) => {
                 if self.dma_out_available {
-                    self.sim.view.dma_out = !self.sim.view.dma_out;
+                    self.view.dma_out = !self.view.dma_out;
                 } else {
                     self.status = "DMA OUT requires OUTC (0x0) and OUTD (0x8) labels in source".to_string();
                 }
             }
             (Pane::Inp, 1 | 5) => {
                 if self.dma_inp_available {
-                    self.sim.view.dma_inp = !self.sim.view.dma_inp;
+                    self.view.dma_inp = !self.view.dma_inp;
                 } else {
                     self.status = "DMA INP requires INPC (0x10) and INPD (0x18) labels in source".to_string();
                 }
@@ -402,10 +400,11 @@ impl AppCommands for App {
                 self.needs_full_clear = true;
             }
             (Pane::Exec, 2) => {
-                self.sim.convention.enabled = !self.sim.convention.enabled;
+                let next = !self.machine.convention_enabled();
+                self.machine.set_convention_enabled(next);
                 self.status = format!(
                     "Calling convention checker: {}",
-                    if self.sim.convention.enabled { "ON" } else { "OFF" }
+                    if next { "ON" } else { "OFF" }
                 );
                 self.needs_full_clear = true;
             }
@@ -414,26 +413,24 @@ impl AppCommands for App {
                 self.needs_full_clear = true;
             }
             (Pane::Source, 1) => {
-                self.sim.dialect = rvs_transpile::AssemblyDialect::Rvs;
+                self.machine.set_dialect(Dialect::Rvs);
                 self.status = "Assembly dialect: RVS".to_string();
                 self.needs_full_clear = true;
             }
             (Pane::Source, 2) => {
-                self.sim.dialect = rvs_transpile::AssemblyDialect::Gnu;
+                self.machine.set_dialect(Dialect::Gnu);
                 self.status = "Assembly dialect: GNU".to_string();
                 self.needs_full_clear = true;
             }
             (Pane::Source, 3) => {
-                let is_cur_rvs = self.sim.dialect == rvs_transpile::AssemblyDialect::Rvs;
+                let is_cur_rvs = self.machine.dialect() == Dialect::Rvs;
                 let src = self.editor.text();
-                let transpiled = if is_cur_rvs {
-                    rvs_transpile::transpile_rvs_to_gnu(&src)
-                } else {
-                    rvs_transpile::transpile_gnu_to_rvs(&src)
-                };
-                self.editor.replace_text(&transpiled);
-                self.sim.dialect = self.sim.dialect.toggle();
-                self.status = format!("Transpiled buffer to {} and switched mode", self.sim.dialect.name());
+                let target = if is_cur_rvs { Dialect::Gnu } else { Dialect::Rvs };
+                if let Some(transpiled) = self.machine.transpile(&src, target) {
+                    self.editor.replace_text(&transpiled);
+                }
+                self.machine.set_dialect(target);
+                self.status = format!("Transpiled buffer to {} and switched mode", target.name());
                 self.needs_full_clear = true;
             }
             _ => {}
@@ -443,12 +440,12 @@ impl AppCommands for App {
     fn clear_pane(&mut self, pane: Pane) {
         match pane {
             Pane::Exec => {
-                self.sim.exec_log.clear();
+                self.machine.clear_exec_log();
                 self.scroll_exec = 0;
                 self.needs_full_clear = true;
             }
             Pane::Out => {
-                self.sim.output.clear();
+                self.machine.clear_output();
                 self.scroll_out = 0;
                 self.needs_full_clear = true;
             }

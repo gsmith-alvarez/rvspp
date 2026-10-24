@@ -2,6 +2,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use rvs_app::{App, ConfirmAction, FileAction, Modal, Mode, Pane};
+use rvs_machine::{Dialect, Machine};
+use rvs_machine_riscv::RiscV;
 use rvs_app_cmds::AppCommands as _;
 use rvs_app_keys::AppKeys as _;
 use rvs_ui as ui;
@@ -18,7 +20,7 @@ fn ctrl(c: char) -> KeyEvent {
     KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
 }
 
-fn type_str(app: &mut App, s: &str) {
+fn type_str(app: &mut App<RiscV>, s: &str) {
     for c in s.chars() {
         app.on_key(char_key(c));
     }
@@ -29,7 +31,7 @@ fn test_interactive_tui_lifecycle_and_rendering() {
     let backend = TestBackend::new(120, 36);
     let mut terminal = Terminal::new(backend).unwrap();
 
-    let mut app = App::new(None);
+    let mut app = App::<RiscV>::new(None);
     app.editor.set_text("addi x1, x0, 5\naddi x2, x0, 10\nadd x3, x1, x2\nebreak x0, x0, 0\n");
 
     // 1. Initial draw
@@ -41,19 +43,19 @@ fn test_interactive_tui_lifecycle_and_rendering() {
 
     // 2. Compile ('c')
     app.on_key(char_key('c'));
-    assert!(app.sim.listing.contains("ASSEMBLY LISTING"));
-    assert!(app.sim.listing.contains("addi"));
+    assert!(app.machine.sim().listing.contains("ASSEMBLY LISTING"));
+    assert!(app.machine.sim().listing.contains("addi"));
 
     // 3. START ('s')
     app.on_key(char_key('s'));
-    assert_eq!(app.sim.regs.pc, 0);
-    assert!(app.sim.exec_log.contains("START\n"));
+    assert_eq!(app.machine.sim().regs.pc, 0);
+    assert!(app.machine.sim().exec_log.contains("START\n"));
 
     // 4. Step ('n')
     app.on_key(char_key('n'));
-    assert_eq!(app.sim.regs.pc, 4);
-    assert_eq!(app.sim.regs.read_x(1), 5);
-    assert!(app.sim.exec_log.contains("addi    x1 x0 0x005"));
+    assert_eq!(app.machine.sim().regs.pc, 4);
+    assert_eq!(app.machine.sim().regs.read_x(1), 5);
+    assert!(app.machine.sim().exec_log.contains("addi    x1 x0 0x005"));
 
     // 5. Run ('r') to completion
     app.on_key(char_key('r'));
@@ -61,8 +63,8 @@ fn test_interactive_tui_lifecycle_and_rendering() {
     while app.running {
         app.run_chunk(std::time::Duration::from_millis(50));
     }
-    assert_eq!(app.sim.regs.read_x(3), 15);
-    assert!(app.sim.exec_log.contains("ebreak"));
+    assert_eq!(app.machine.sim().regs.read_x(3), 15);
+    assert!(app.machine.sim().exec_log.contains("ebreak"));
     assert_eq!(app.mode, Mode::Normal);
 
     // 6. About modal ('?') and Esc close
@@ -81,7 +83,7 @@ fn test_interactive_tui_lifecycle_and_rendering() {
 
 #[test]
 fn test_continuous_run_resumes_across_input() {
-    let mut app = App::new(None);
+    let mut app = App::<RiscV>::new(None);
     app.editor.set_text("addi x1, x0, 5\necall x2, x0, 5\nadd x3, x1, x2\nebreak x0, x0, 0\n");
     app.compile();
 
@@ -95,7 +97,7 @@ fn test_continuous_run_resumes_across_input() {
     assert_eq!(app.mode, Mode::Input);
     assert!(!app.running);
     assert!(app.was_running);
-    assert_eq!(app.sim.regs.read_x(1), 5);
+    assert_eq!(app.machine.sim().regs.read_x(1), 5);
 
     // 2. User enters "40" and presses Enter
     type_str(&mut app, "40");
@@ -104,50 +106,50 @@ fn test_continuous_run_resumes_across_input() {
     // Execution MUST automatically resume running
     assert_eq!(app.mode, Mode::Running);
     assert!(app.running);
-    assert_eq!(app.sim.regs.read_x(2), 40);
+    assert_eq!(app.machine.sim().regs.read_x(2), 40);
 
     // 3. Process remaining instructions to ebreak
     while app.running {
         app.run_chunk(std::time::Duration::from_millis(50));
     }
     assert_eq!(app.mode, Mode::Normal);
-    assert_eq!(app.sim.regs.read_x(3), 45);
-    assert!(app.sim.exec_log.contains("ebreak"));
+    assert_eq!(app.machine.sim().regs.read_x(3), 45);
+    assert!(app.machine.sim().exec_log.contains("ebreak"));
 }
 
 #[test]
 fn test_run_vs_start_pc_semantics() {
-    let mut app = App::new(None);
+    let mut app = App::<RiscV>::new(None);
     app.editor.set_text("addi x1, x0, 5\naddi x2, x0, 10\nebreak x0, x0, 0\n");
     app.compile();
 
     // Step first instruction: PC becomes 4, x1 becomes 5
     app.action_next();
-    assert_eq!(app.sim.regs.pc, 4);
-    assert_eq!(app.sim.regs.read_x(1), 5);
-    assert_eq!(app.sim.regs.read_x(2), 0);
+    assert_eq!(app.machine.sim().regs.pc, 4);
+    assert_eq!(app.machine.sim().regs.read_x(1), 5);
+    assert_eq!(app.machine.sim().regs.read_x(2), 0);
 
     // Press 'r' (Run): MUST NOT reset PC! It continues from PC=4
     app.action_run();
-    assert_eq!(app.sim.regs.pc, 4);
+    assert_eq!(app.machine.sim().regs.pc, 4);
     while app.running {
         app.run_chunk(std::time::Duration::from_millis(50));
     }
-    assert_eq!(app.sim.regs.read_x(2), 10);
+    assert_eq!(app.machine.sim().regs.read_x(2), 10);
 
     // Press 's' (START): MUST reset PC to 0 and run from beginning
     app.action_start();
-    assert_eq!(app.sim.regs.pc, 0);
+    assert_eq!(app.machine.sim().regs.pc, 0);
     while app.running {
         app.run_chunk(std::time::Duration::from_millis(50));
     }
-    assert_eq!(app.sim.regs.read_x(1), 5);
-    assert_eq!(app.sim.regs.read_x(2), 10);
+    assert_eq!(app.machine.sim().regs.read_x(1), 5);
+    assert_eq!(app.machine.sim().regs.read_x(2), 10);
 }
 
 #[test]
 fn test_unsaved_changes_modal_and_newline_exemption() {
-    let mut app = App::new(None);
+    let mut app = App::<RiscV>::new(None);
 
     // a) Newline-only modifications do not trigger ConfirmSave on Ctrl+O or q
     app.on_key(char_key('i'));
@@ -165,7 +167,7 @@ fn test_unsaved_changes_modal_and_newline_exemption() {
     assert!(app.quit_requested);
 
     // b) Real modifications open ConfirmSave on q, Esc cancels, typing edits path, Ctrl+D discards
-    let mut app2 = App::new(None);
+    let mut app2 = App::<RiscV>::new(None);
     app2.fname = "file.s".to_string();
     app2.editor.set_text("modified code\n");
     app2.editor.modified = true;
@@ -208,7 +210,7 @@ fn test_file_explorer_navigation_filter_and_load() {
 
     let backend = TestBackend::new(120, 36);
     let mut terminal = Terminal::new(backend).unwrap();
-    let mut app = App::new(None);
+    let mut app = App::<RiscV>::new(None);
 
     // Open Load modal (Ctrl+O)
     app.on_key(ctrl('o'));
@@ -287,7 +289,7 @@ fn test_vim_editor_motions_operators_and_cursor_alignment() {
     let backend = TestBackend::new(120, 36);
     let mut terminal = Terminal::new(backend).unwrap();
 
-    let mut app = App::new(None);
+    let mut app = App::<RiscV>::new(None);
     // Line 0 starts with a tab character to verify tab visual expansion (8 cols)
     app.editor.set_text("\taddi x1, x0, 5\naddi x2, x0, 10\nadd x3, x1, x2");
     assert_eq!(app.focus, Pane::Source);
@@ -377,7 +379,7 @@ fn test_vim_editor_motions_operators_and_cursor_alignment() {
 
 #[test]
 fn test_pane_cycling_zoom_and_command_bar() {
-    let mut app = App::new(None);
+    let mut app = App::<RiscV>::new(None);
     app.editor.set_text("addi x1, x0, 42\nebreak x0, x0, 0\n");
 
     // 1. Pane focus cycling forward (Tab) and backward (BackTab)
@@ -438,13 +440,13 @@ fn test_pane_cycling_zoom_and_command_bar() {
     type_str(&mut app, "compile");
     app.on_key(key(KeyCode::Enter));
     assert_eq!(app.mode, Mode::Normal);
-    assert!(app.sim.listing.contains("ASSEMBLY LISTING"));
+    assert!(app.machine.sim().listing.contains("ASSEMBLY LISTING"));
 
     // Step with :next
     app.command_input = "next".to_string();
     app.execute_command();
-    assert_eq!(app.sim.regs.pc, 4);
-    assert_eq!(app.sim.regs.read_x(1), 42);
+    assert_eq!(app.machine.sim().regs.pc, 4);
+    assert_eq!(app.machine.sim().regs.read_x(1), 42);
 
     // Zoom with :zoom and unzoom with :z
     app.command_input = "zoom".to_string();
@@ -468,7 +470,7 @@ fn test_load_and_recompile_clear_all_panes_and_scrolls() {
     let backend = TestBackend::new(120, 36);
     let mut terminal = Terminal::new(backend).unwrap();
 
-    let mut app = App::new(None);
+    let mut app = App::<RiscV>::new(None);
     app.editor.set_text("addi x1, x0, 5\nebreak x0, x0, 0\n");
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
 
@@ -476,9 +478,9 @@ fn test_load_and_recompile_clear_all_panes_and_scrolls() {
     app.compile();
     app.action_start();
     app.action_next();
-    assert_eq!(app.sim.regs.read_x(1), 5);
-    app.sim.output.push_str("Program Output Line\n");
-    app.sim.mem.insert_dd(0x1000, "42", "42");
+    assert_eq!(app.machine.sim().regs.read_x(1), 5);
+    app.machine.sim_mut().output.push_str("Program Output Line\n");
+    app.machine.sim_mut().mem.insert_dd(0x1000, "42", "42");
     app.scroll_listing = 5;
     app.scroll_exec = 5;
     app.scroll_regs = 5;
@@ -490,11 +492,11 @@ fn test_load_and_recompile_clear_all_panes_and_scrolls() {
     app.execute_command();
 
     // Verify all simulator state and scroll offsets are completely reset
-    assert!(app.sim.listing.is_empty(), "Listing must be cleared on file load");
-    assert!(app.sim.exec_log.is_empty(), "Exec log must be cleared on file load");
-    assert!(app.sim.output.is_empty(), "Output must be cleared on file load");
-    assert!(app.sim.mem.cells.is_empty(), "Memory must be cleared on file load");
-    assert_eq!(app.sim.regs.read_x(1), 0, "Registers must be reset on file load");
+    assert!(app.machine.sim().listing.is_empty(), "Listing must be cleared on file load");
+    assert!(app.machine.sim().exec_log.is_empty(), "Exec log must be cleared on file load");
+    assert!(app.machine.sim().output.is_empty(), "Output must be cleared on file load");
+    assert!(app.machine.sim().mem.cells.is_empty(), "Memory must be cleared on file load");
+    assert_eq!(app.machine.sim().regs.read_x(1), 0, "Registers must be reset on file load");
     assert_eq!([app.scroll_listing, app.scroll_exec, app.scroll_regs, app.scroll_mem, app.scroll_out], [0; 5]);
     assert!(app.needs_full_clear, "needs_full_clear must be set on file load");
 
@@ -507,7 +509,7 @@ fn test_load_and_recompile_clear_all_panes_and_scrolls() {
     app.compile();
     app.action_start();
     app.action_next();
-    app.sim.output.push_str("New output\n");
+    app.machine.sim_mut().output.push_str("New output\n");
     app.scroll_listing = 3;
     app.scroll_exec = 3;
     app.scroll_regs = 3;
@@ -516,8 +518,8 @@ fn test_load_and_recompile_clear_all_panes_and_scrolls() {
 
     // Recompile: verify exec_log, output, and all 5 scrolls reset to 0, needs_full_clear set
     app.compile();
-    assert!(app.sim.exec_log.is_empty(), "Exec log must be cleared on recompile");
-    assert!(app.sim.output.is_empty(), "Output must be cleared on recompile");
+    assert!(app.machine.sim().exec_log.is_empty(), "Exec log must be cleared on recompile");
+    assert!(app.machine.sim().output.is_empty(), "Output must be cleared on recompile");
     assert_eq!([app.scroll_listing, app.scroll_exec, app.scroll_regs, app.scroll_mem, app.scroll_out], [0; 5]);
     assert!(app.needs_full_clear, "needs_full_clear must be set on recompile");
 }
@@ -526,27 +528,27 @@ fn test_load_and_recompile_clear_all_panes_and_scrolls() {
 fn test_pill_toggles_and_dma_ux() {
     let backend = TestBackend::new(160, 40);
     let mut terminal = Terminal::new(backend).unwrap();
-    let mut app = App::new(None);
+    let mut app = App::<RiscV>::new(None);
 
     // 1. Regs pane toggles 1 (HEX), 2 (INT), 3 (FLP)
     app.focus = Pane::Regs;
     app.on_key(char_key('1'));
-    assert!(!app.sim.view.reg_hex);
+    assert!(!app.view.reg_hex);
     app.on_key(char_key('2'));
-    assert!(!app.sim.view.reg_int);
+    assert!(!app.view.reg_int);
     app.on_key(char_key('3'));
-    assert!(!app.sim.view.reg_flp);
+    assert!(!app.view.reg_flp);
 
     // 2. Mem pane toggles 1 (HEX), 2 (INT), 3 (FLP), 4 (TXT)
     app.focus = Pane::Mem;
     app.on_key(char_key('1'));
-    assert!(!app.sim.view.mem_hex);
+    assert!(!app.view.mem_hex);
     app.on_key(char_key('2'));
-    assert!(!app.sim.view.mem_int);
+    assert!(!app.view.mem_int);
     app.on_key(char_key('3'));
-    assert!(!app.sim.view.mem_flp);
+    assert!(!app.view.mem_flp);
     app.on_key(char_key('4'));
-    assert!(!app.sim.view.mem_txt);
+    assert!(!app.view.mem_txt);
 
     // 3. DMA unavailable indicators on Out and Inp
     app.focus = Pane::Out;
@@ -563,13 +565,13 @@ fn test_pill_toggles_and_dma_ux() {
     // 4. Regs Hex toggle affects rendered register values
     app.focus = Pane::Regs;
     app.zoomed_pane = Some(Pane::Regs);
-    app.sim.view.reg_int = true;
-    app.sim.view.reg_hex = true;
+    app.view.reg_int = true;
+    app.view.reg_hex = true;
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
     assert!(terminal.backend().to_string().contains("0x0000000000000000"));
 
     app.on_key(char_key('1'));
-    assert!(!app.sim.view.reg_hex);
+    assert!(!app.view.reg_hex);
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
     assert!(!terminal.backend().to_string().contains("0x0000000000000000"));
     app.zoomed_pane = None;
@@ -578,7 +580,7 @@ fn test_pill_toggles_and_dma_ux() {
     app.editor.set_text("OUTC: DD 0\nOUTD: DD 0\nSTART: addi x1, x0, 5\n");
     app.compile();
     assert!(app.dma_out_available);
-    assert!(app.sim.view.dma_out);
+    assert!(app.view.dma_out);
 
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
     assert!(terminal.backend().to_string().contains("[DMA:ON]"));
@@ -589,12 +591,12 @@ fn test_listing_correlated_colorizing_and_toggle() {
     let backend = TestBackend::new(140, 36);
     let mut terminal = Terminal::new(backend).unwrap();
 
-    let mut app = App::new(None);
+    let mut app = App::<RiscV>::new(None);
     assert!(app.colorize_listing);
 
     app.editor.set_text("addi x1, x0, 5\nebreak x0, x0, 0\n");
     app.compile();
-    app.sim.view.list_bin = true;
+    app.view.list_bin = true;
     app.focus = Pane::Listing;
     app.zoomed_pane = Some(Pane::Listing);
 
@@ -642,7 +644,7 @@ fn test_tier1_debugging_features() {
     let backend = TestBackend::new(140, 36);
     let mut terminal = Terminal::new(backend).unwrap();
 
-    let mut app = App::new(None);
+    let mut app = App::<RiscV>::new(None);
     let src = "START: addi x1, x0, 10\naddi x2, x0, 20\nadd x3, x1, x2\nebreak x0, x0, 0\n";
     app.editor.set_text(src);
     app.compile();
@@ -681,31 +683,31 @@ fn test_tier1_debugging_features() {
     while app.running {
         app.run_chunk(std::time::Duration::from_millis(50));
     }
-    assert_eq!(app.sim.regs.pc, 4);
-    assert_eq!(app.sim.regs.read_x(1), 10);
-    assert_eq!(app.sim.regs.read_x(2), 0); // line 2 not executed yet
+    assert_eq!(app.machine.sim().regs.pc, 4);
+    assert_eq!(app.machine.sim().regs.read_x(1), 10);
+    assert_eq!(app.machine.sim().regs.read_x(2), 0); // line 2 not executed yet
     assert!(app.status.contains("Breakpoint hit"));
     // Continue run from 0x4 to next breakpoint at 0x8
     app.action_run();
     while app.running {
         app.run_chunk(std::time::Duration::from_millis(50));
     }
-    assert_eq!(app.sim.regs.pc, 8);
-    assert_eq!(app.sim.regs.read_x(1), 10);
-    assert_eq!(app.sim.regs.read_x(2), 20);
-    assert_eq!(app.sim.regs.read_x(3), 0);
+    assert_eq!(app.machine.sim().regs.pc, 8);
+    assert_eq!(app.machine.sim().regs.read_x(1), 10);
+    assert_eq!(app.machine.sim().regs.read_x(2), 20);
+    assert_eq!(app.machine.sim().regs.read_x(3), 0);
     assert!(app.status.contains("Breakpoint hit"));
 
     // 2. Step back: execute 1 step forward, then step back
     app.action_next();
-    assert_eq!(app.sim.regs.pc, 12);
-    assert_eq!(app.sim.regs.read_x(3), 30);
+    assert_eq!(app.machine.sim().regs.pc, 12);
+    assert_eq!(app.machine.sim().regs.read_x(3), 30);
 
     // Press 'p' to rewind / step back
     app.focus = Pane::Listing;
     app.on_key(char_key('p'));
-    assert_eq!(app.sim.regs.pc, 8);
-    assert_eq!(app.sim.regs.read_x(3), 0);
+    assert_eq!(app.machine.sim().regs.pc, 8);
+    assert_eq!(app.machine.sim().regs.read_x(3), 0);
     assert!(app.status.contains("Stepped back"));
 
     // 3. Execution speed adjustments:
@@ -717,8 +719,8 @@ fn test_tier1_debugging_features() {
     assert_eq!(app.run_speed, rvs_app::RunSpeed::Hz20);
 
     // 4. Memory navigation & stack pointer jump
-    app.sim.regs.write_x(2, 0x2000, false);
-    app.sim.mem.insert_dd(0x2000, "12345", "12345");
+    app.machine.sim_mut().regs.write_x(2, 0x2000, false);
+    app.machine.sim_mut().mem.insert_dd(0x2000, "12345", "12345");
     app.focus = Pane::Mem;
     app.command_input = ":mem sp".to_string();
     app.execute_command();
@@ -734,11 +736,11 @@ fn test_tier2_execution_metrics_and_calling_convention() {
     let backend = TestBackend::new(140, 40);
     let mut terminal = Terminal::new(backend).unwrap();
 
-    let mut app = App::new(None);
+    let mut app = App::<RiscV>::new(None);
     let src = "START: addi sp, x0, 8\njal ra, func\nebreak x0, x0, 0\nfunc: addi s0, x0, 99\njalr x0, ra, 0\n";
     app.editor.set_text(src);
     app.compile();
-    assert!(app.sim.convention.enabled);
+    assert!(app.machine.convention_enabled());
 
     // Run to completion
     app.action_start();
@@ -747,19 +749,19 @@ fn test_tier2_execution_metrics_and_calling_convention() {
     }
 
     // 1. Verify metrics counter accumulated accurately
-    let m = &app.sim.metrics;
+    let m = &app.machine.metrics();
     assert!(m.instructions >= 4, "Should execute at least 4 instructions");
     assert!(m.cycles >= m.instructions, "Cycles should equal or exceed instruction count");
     assert_eq!(m.jumps, 2, "Should record 2 jumps (jal + jalr)");
 
     // 2. Verify calling convention checker caught both violations
-    let cc = &app.sim.convention;
+    let cc = &app.machine.convention();
     assert!(cc.violations.len() >= 2, "Must detect stack misalignment and saved register clobber");
     assert!(cc.violations.iter().any(|v| v.contains("Stack pointer sp is not 16-byte aligned")));
     assert!(cc.violations.iter().any(|v| v.contains("Saved register s0 was modified")));
 
     // Execution log should contain WARN messages
-    assert!(app.sim.exec_log.contains("WARN [Convention]:"));
+    assert!(app.machine.sim().exec_log.contains("WARN [Convention]:"));
 
     // 3. Open :stats modal and verify rendered output
     app.command_input = ":stats".to_string();
@@ -781,20 +783,20 @@ fn test_tier2_execution_metrics_and_calling_convention() {
     // 4. Test toggling convention checker with command :cc off / :cc on
     app.command_input = ":cc off".to_string();
     app.execute_command();
-    assert!(!app.sim.convention.enabled);
+    assert!(!app.machine.convention_enabled());
     app.command_input = ":cc on".to_string();
     app.execute_command();
-    assert!(app.sim.convention.enabled);
+    assert!(app.machine.convention_enabled());
 }
 
 #[test]
 fn test_gnu_assembly_dialect_and_transpiler() {
-    let mut app = App::new(None);
+    let mut app = App::<RiscV>::new(None);
 
     // 1. Verify GNU mode assembling standard GNU syntax & pseudo-instructions
     app.command_input = ":mode gnu".to_string();
     app.execute_command();
-    assert_eq!(app.sim.dialect, rvs_transpile::AssemblyDialect::Gnu);
+    assert_eq!(app.machine.dialect(), Dialect::Gnu);
 
     let gnu_source = r#"
 .globl main
@@ -812,7 +814,7 @@ helper:
 "#;
     app.editor.set_text(gnu_source);
     app.compile();
-    assert!(!app.sim.listing.contains("ERROR:"), "Listing had error: {}", app.sim.listing);
+    assert!(!app.machine.sim().listing.contains("ERROR:"), "Listing had error: {}", app.machine.sim().listing);
 
     app.action_start();
     while app.running {
@@ -820,8 +822,8 @@ helper:
     }
 
     // a0 should be 42 + 10 = 52, a1 should be 42
-    assert_eq!(app.sim.regs.read_x(10), 52); // a0 = x10
-    assert_eq!(app.sim.regs.read_x(11), 42); // a1 = x11
+    assert_eq!(app.machine.sim().regs.read_x(10), 52); // a0 = x10
+    assert_eq!(app.machine.sim().regs.read_x(11), 42); // a1 = x11
 
     // 2. Test in-place buffer transpiler commands
     app.command_input = ":transpile rvs".to_string();
@@ -859,16 +861,16 @@ helper:
     assert!(!frame.contains("Source [GNU]"));
 
     app.toggle_pane_option(Pane::Source, 1);
-    assert_eq!(app.sim.dialect, rvs_transpile::AssemblyDialect::Rvs);
+    assert_eq!(app.machine.dialect(), Dialect::Rvs);
     app.toggle_pane_option(Pane::Source, 2);
-    assert_eq!(app.sim.dialect, rvs_transpile::AssemblyDialect::Gnu);
+    assert_eq!(app.machine.dialect(), Dialect::Gnu);
     app.toggle_pane_option(Pane::Source, 3);
-    assert_eq!(app.sim.dialect, rvs_transpile::AssemblyDialect::Rvs);
+    assert_eq!(app.machine.dialect(), Dialect::Rvs);
 }
 
 #[test]
 fn test_editor_ctrl_backspace_and_word_deletion() {
-    let mut app = App::new(None);
+    let mut app = App::<RiscV>::new(None);
     app.mode = Mode::Edit;
     app.editor.set_text("hello world   123");
     app.editor.col = 17;
@@ -889,7 +891,7 @@ fn test_call_stack_and_frame_visualizer() {
     let backend = TestBackend::new(140, 40);
     let mut terminal = Terminal::new(backend).unwrap();
 
-    let mut app = App::new(None);
+    let mut app = App::<RiscV>::new(None);
     // A program with a call frame that allocates stack and saves return address
     let src = r#"
 START:  addi sp, x0, 0x100      # 16-byte aligned sp = 256
@@ -916,7 +918,7 @@ inner:  ebreak x0, x0, 0        # pause execution inside inner function
     }
 
     // 1. Verify CallFrame stack inspection
-    let frames = app.sim.get_stack_frames();
+    let frames = app.machine.stack().frames;
     assert_eq!(frames.len(), 2, "Should have 2 active call frames (outer and inner)");
 
     let outer_frame = &frames[0];
@@ -950,7 +952,7 @@ inner:  ebreak x0, x0, 0        # pause execution inside inner function
 fn test_initial_frame_snapshot() {
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).unwrap();
-    let mut app = App::new(None);
+    let mut app = App::<RiscV>::new(None);
     app.editor
         .set_text("addi x1, x0, 5\nadd x2, x1, x1\nebreak x0, x0, 0\n");
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();

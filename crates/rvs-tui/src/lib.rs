@@ -36,7 +36,7 @@ pub fn route(cli: Cli) -> ExitCode {
             .unwrap_or(cli.timeout);
         match (asm, input, out) {
             (Some(asm), Some(input), Some(out)) => {
-                match rvs_format::run_batch_file(&asm, &input, &out, timeout) {
+                match rvs_machine_riscv::run_batch_file(&asm, &input, &out, timeout) {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(e) => {
                         eprintln!("{e}");
@@ -62,6 +62,7 @@ use ratatui::Terminal;
 
 use rvs_app::{App, RunSpeed};
 use rvs_app_cmds::AppCommands;
+use rvs_machine_riscv::RiscV;
 use rvs_app_keys::AppKeys;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -174,7 +175,7 @@ fn event_loop(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     cli: &Cli,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut app = App::new(cli.args.first());
+    let mut app = App::<RiscV>::new(cli.args.first());
     loop {
         if is_terminated() {
             return Ok(());

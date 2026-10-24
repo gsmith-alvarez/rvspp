@@ -7,14 +7,6 @@ authors.workspace = true
 
 [dependencies]
 rvs-app = { path = "../rvs-app" }
-rvs-syntax = { path = "../rvs-syntax" }
-rvs-assembler = { path = "../rvs-assembler" }
-rvs-asm-syntax = { path = "../rvs-asm-syntax" }
-rvs-memory = { path = "../rvs-memory" }
-rvs-tcl = { path = "../rvs-tcl" }
-rvs-transpile = { path = "../rvs-transpile" }
-rvs-format = { path = "../rvs-format" }
-ratatui = { workspace = true }
-unicode-width = { workspace = true }
-unicode-segmentation = { workspace = true }
+rvs-machine = { path = "../rvs-machine" }
 rvs-theme = { path = "../rvs-theme" }
+ratatui = { workspace = true }

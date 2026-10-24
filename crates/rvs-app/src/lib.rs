@@ -1,14 +1,15 @@
-//! Application state and simulator actions for the RVS++ TUI.
+//! Application state and actions for the RVS++ TUI.
+//!
+//! `App<M>` owns UI state and delegates every target-specific operation to a
+//! [`rvs_machine::Machine`]. Swapping the backend swaps the language/ISA; the
+//! editor, explorer, commands, event loop and renderers stay unchanged.
 
+use std::collections::{BTreeSet, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-
-use rvs_ecall::{poll_dma_input, poll_dma_output, submit_dma_input, submit_ecall_input};
 use rvs_editor::Editor;
-use rvs_executor::{step, StepResult};
-use rvs_sim::Simulator;
-use rvs_tcl as tcl;
+use rvs_machine::{Dialect, Machine, RegisterChanges, StepOutcome, ViewFlags, ViewRequest};
 
 /// Parse one batch-entry line: `<asm> <in> <out> [timeout_ms]`.
 ///
@@ -101,8 +102,6 @@ impl Pane {
     }
 }
 
-
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FileAction {
     Load,
@@ -129,13 +128,6 @@ pub enum Modal {
     CallStack,
 }
 
-
-/// Register-file snapshot used to highlight changed registers.
-#[derive(Clone, Default)]
-struct RegSnapshot {
-    x: [u64; 32],
-    f: [u64; 32],
-}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum RunSpeed {
     Hz1,
@@ -180,18 +172,8 @@ impl RunSpeed {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct SimStateSnapshot {
-    pub regs: rvs_regs::RegisterFile,
-    pub mem: rvs_memory::Memory,
-    pub exec_log: String,
-    pub output: String,
-    pub pc: u64,
-}
-
-
-pub struct App {
-    pub sim: Simulator,
+pub struct App<M: Machine> {
+    pub machine: M,
     pub editor: Editor,
     pub mode: Mode,
     pub focus: Pane,
@@ -219,18 +201,20 @@ pub struct App {
     pub zoomed_pane: Option<Pane>,
     pub pending_external_editor: bool,
     pub colorize_listing: bool,
-    pub breakpoints: std::collections::BTreeSet<u64>,
-    pub step_history: std::collections::VecDeque<SimStateSnapshot>,
+    /// UI-owned checkbutton state.
+    pub view: ViewFlags,
+    pub breakpoints: BTreeSet<u64>,
+    pub step_history: VecDeque<M::Snapshot>,
     pub run_speed: RunSpeed,
     pub at_breakpoint: bool,
-    last_regs: RegSnapshot,
+    last_snapshot: M::Snapshot,
     changed_x: [bool; 32],
     changed_f: [bool; 32],
 }
 
-impl App {
+impl<M: Machine> App<M> {
     pub fn new(path: Option<&String>) -> Self {
-        let mut sim = Simulator::new();
+        let mut machine = M::new();
         let mut editor = Editor::default();
         editor.set_text("");
         let mut fname = String::new();
@@ -248,10 +232,11 @@ impl App {
                 }
             }
         }
-        sim.source = editor.text();
-        sim.convention.enabled = true;
+        machine.set_source(&editor.text());
+        machine.set_convention_enabled(true);
+        let snapshot = machine.snapshot();
         Self {
-            sim,
+            machine,
             editor,
             mode: Mode::Normal,
             focus: Pane::Source,
@@ -279,25 +264,38 @@ impl App {
             zoomed_pane: None,
             pending_external_editor: false,
             colorize_listing: true,
-            breakpoints: std::collections::BTreeSet::new(),
-            step_history: std::collections::VecDeque::new(),
+            view: ViewFlags::default(),
+            breakpoints: BTreeSet::new(),
+            step_history: VecDeque::new(),
             run_speed: RunSpeed::Max,
             at_breakpoint: false,
-            last_regs: RegSnapshot::default(),
+            last_snapshot: snapshot,
             changed_x: [false; 32],
             changed_f: [false; 32],
+        }
+    }
+
+    /// Snapshot of everything the renderers need for this frame.
+    pub fn view_request(&self) -> ViewRequest {
+        ViewRequest {
+            flags: self.view.clone(),
+            pc: self.machine.pc(),
+            breakpoints: self.breakpoints.clone(),
+            changed_x: self.changed_x.to_vec(),
+            changed_f: self.changed_f.to_vec(),
+            colorize: self.colorize_listing,
         }
     }
 
     // ----- actions -----------------------------------------------------
 
     pub fn reset_sim_panes(&mut self) {
-        let view = self.sim.view.clone();
-        let conv_enabled = self.sim.convention.enabled;
-        self.sim = Simulator::new();
-        self.sim.convention.enabled = conv_enabled;
-        self.sim.view = view;
-        self.sim.source = self.editor.text();
+        let dialect = self.machine.dialect();
+        let convention = self.machine.convention_enabled();
+        self.machine.reset();
+        self.machine.set_dialect(dialect);
+        self.machine.set_convention_enabled(convention);
+        self.machine.set_source(&self.editor.text());
         self.running = false;
         self.was_running = false;
         self.dma_out_available = false;
@@ -316,44 +314,18 @@ impl App {
 
     pub fn compile(&mut self) {
         let src = self.editor.text();
-        self.sim.inp_prompt = false;
         self.running = false;
         self.was_running = false;
-        self.sim.brk = false;
-        self.sim.pending = None;
-        self.sim.entry_type.clear();
         self.input_line.clear();
-        self.sim.convention.reset();
-        self.sim.metrics.reset();
-        match rvs_assembler::assemble(&mut self.sim, &src) {
-            Ok(listing) => {
-                self.sim.listing = format!("{listing}\n");
-            }
-            Err(err) => {
-                self.sim
-                    .sym
-                    .insert("START".to_string(), Simulator::START_DEFAULT.to_string());
-                self.sim.regs.pc =
-                    tcl::parse_int(Simulator::START_DEFAULT).unwrap_or(0) as u64;
-                self.sim.listing =
-                    format!("{}ERROR: {}\n\n", err.progress, err.message);
-            }
-        }
-        self.sim.source = src;
-        self.sim.exec_log.clear();
-        self.sim.output.clear();
-        self.dma_out_available = self.sim.sym.contains_key("OUTC") && self.sim.sym.contains_key("OUTD");
-        self.dma_inp_available = self.sim.sym.contains_key("INPC") && self.sim.sym.contains_key("INPD");
-        if self.dma_out_available {
-            self.sim.view.dma_out = true;
-        } else {
-            self.sim.view.dma_out = false;
-        }
-        if self.dma_inp_available {
-            self.sim.view.dma_inp = true;
-        } else {
-            self.sim.view.dma_inp = false;
-            self.sim.entry_type.clear();
+        let _ = self.machine.load(&src);
+        let (out, inp) = self.machine.dma_availability();
+        self.dma_out_available = out;
+        self.dma_inp_available = inp;
+        self.view.dma_out = out;
+        self.view.dma_inp = inp;
+        if !inp {
+            // The backend clears its entry state on load; the UI clears here.
+            self.input_line.clear();
         }
         self.scroll_listing = 0;
         self.scroll_regs = 0;
@@ -365,30 +337,17 @@ impl App {
     }
 
     pub fn reset_pc(&mut self) {
-        let pc = self
-            .sim
-            .sym
-            .get("START")
-            .and_then(|s| tcl::parse_int(s))
-            .map(|v| v as u64)
-            .unwrap_or(0);
-        self.sim.regs.pc = pc;
+        self.machine.reset_pc();
     }
 
     pub fn refresh_listing(&mut self) {
-        if !self.sim.listing.is_empty() && !self.sim.listing.contains("ERROR:") {
-            self.sim.listing = format!("{}\n", rvs_assembler::dump(&mut self.sim));
-            self.needs_full_clear = true;
-        }
+        self.machine.refresh_listing();
+        self.needs_full_clear = true;
     }
 
     pub fn action_start(&mut self) {
-        self.reset_pc();
-        self.sim.exec_log.push_str("START\n");
-        self.sim.inp_prompt = false;
+        self.machine.start();
         self.at_breakpoint = false;
-        self.sim.convention.reset();
-        self.sim.metrics.reset();
         self.running = true;
         self.was_running = false;
         self.mode = Mode::Running;
@@ -402,24 +361,23 @@ impl App {
         if self.mode == Mode::Running {
             self.mode = Mode::Normal;
         }
-        self.sim.exec_log.push_str("NEXT\n");
+        self.machine.append_log("NEXT\n");
         self.do_step();
     }
 
     pub fn ensure_pc_wide(&mut self) -> bool {
-        // The reference validates the PC entry; ours always holds a number.
         true
     }
 
     pub fn action_run(&mut self) {
-        self.sim.exec_log.push_str("RUN\n");
+        self.machine.append_log("RUN\n");
         self.running = true;
         self.was_running = false;
         self.mode = Mode::Running;
     }
 
     pub fn action_stop(&mut self) {
-        self.sim.brk = true;
+        self.machine.request_stop();
         self.was_running = false;
         self.running = false;
         if self.mode == Mode::Input {
@@ -429,10 +387,7 @@ impl App {
     }
 
     pub fn take_reg_snapshot(&mut self) {
-        self.last_regs = RegSnapshot {
-            x: self.sim.regs.x_values(),
-            f: self.sim.regs.f_values(),
-        };
+        self.last_snapshot = self.machine.snapshot();
         self.changed_x = [false; 32];
         self.changed_f = [false; 32];
     }
@@ -441,23 +396,17 @@ impl App {
         if self.step_history.len() >= 128 {
             self.step_history.pop_front();
         }
-        self.step_history.push_back(SimStateSnapshot {
-            regs: self.sim.regs.clone(),
-            mem: self.sim.mem.clone(),
-            exec_log: self.sim.exec_log.clone(),
-            output: self.sim.output.clone(),
-            pc: self.sim.regs.pc,
-        });
+        self.step_history.push_back(self.machine.snapshot());
         self.take_reg_snapshot();
-        match step(&mut self.sim) {
-            StepResult::Continued => {}
-            StepResult::Halted => {
+        match self.machine.step() {
+            StepOutcome::Continued => {}
+            StepOutcome::Halted => {
                 self.running = false;
                 if self.mode == Mode::Running {
                     self.mode = Mode::Normal;
                 }
             }
-            StepResult::WaitingForInput => {
+            StepOutcome::WaitingForInput => {
                 self.mode = Mode::Input;
                 self.focus = Pane::Inp;
                 self.was_running = self.running;
@@ -469,14 +418,10 @@ impl App {
 
     pub fn action_step_back(&mut self) {
         if let Some(snap) = self.step_history.pop_back() {
-            self.sim.regs = snap.regs;
-            self.sim.mem = snap.mem;
-            self.sim.exec_log = snap.exec_log;
-            self.sim.output = snap.output;
-            self.sim.regs.pc = snap.pc;
+            self.machine.restore(&snap);
             self.take_reg_snapshot();
             self.needs_full_clear = true;
-            self.status = format!("Stepped back to 0x{:016x}", self.sim.regs.pc);
+            self.status = format!("Stepped back to 0x{:016x}", self.machine.pc());
         } else {
             self.status = "No earlier step history to rewind".to_string();
         }
@@ -490,38 +435,32 @@ impl App {
             self.breakpoints.insert(addr);
             true
         };
-        self.status = format!("Breakpoint {} at 0x{addr:016x}", if is_set { "set" } else { "cleared" });
+        self.status = format!(
+            "Breakpoint {} at 0x{addr:016x}",
+            if is_set { "set" } else { "cleared" }
+        );
         self.needs_full_clear = true;
     }
 
     pub fn toggle_breakpoint_at_pc(&mut self) {
-        self.toggle_breakpoint(self.sim.regs.pc);
-        self.status = format!("Breakpoint toggled at PC (0x{:016x})", self.sim.regs.pc);
+        let pc = self.machine.pc();
+        self.toggle_breakpoint(pc);
+        self.status = format!("Breakpoint toggled at PC (0x{pc:016x})");
     }
 
     pub fn has_breakpoint_on_line(&self, line_idx: usize) -> bool {
-        if let Some(&addr) = self.sim.line_to_addr.get(&line_idx) {
-            self.breakpoints.contains(&addr)
-        } else {
-            false
-        }
+        self.machine
+            .line_address(line_idx)
+            .map(|addr| self.breakpoints.contains(&addr))
+            .unwrap_or(false)
     }
 
     pub fn toggle_breakpoint_at_source_line(&mut self, line_idx: usize) {
-        if let Some(&addr) = self.sim.line_to_addr.get(&line_idx) {
+        if let Some((line, addr)) = self.machine.nearest_line_address(line_idx) {
             self.toggle_breakpoint(addr);
-            self.status = format!("Breakpoint toggled at line {} (0x{addr:016x})", line_idx + 1);
+            self.status = format!("Breakpoint toggled at line {} (0x{addr:016x})", line + 1);
         } else {
-            let closest = self.sim.line_to_addr.range(line_idx..).next();
-            if let Some((&l, &addr)) = closest {
-                self.toggle_breakpoint(addr);
-                self.status = format!("Breakpoint toggled at line {} (0x{addr:016x})", l + 1);
-            } else if let Some((&l, &addr)) = self.sim.line_to_addr.iter().next_back() {
-                self.toggle_breakpoint(addr);
-                self.status = format!("Breakpoint toggled at line {} (0x{addr:016x})", l + 1);
-            } else {
-                self.status = format!("No compiled code for line {}", line_idx + 1);
-            }
+            self.status = format!("No compiled code for line {}", line_idx + 1);
         }
     }
 
@@ -532,27 +471,30 @@ impl App {
     }
 
     pub fn jump_mem_to_address(&mut self, target_addr: u64) {
-        if self.sim.mem.cells.is_empty() {
+        let keys = self.machine.memory_addresses();
+        if keys.is_empty() {
             self.scroll_mem = 0;
             self.status = format!("Memory empty; jump to 0x{target_addr:016x} stored");
             return;
         }
-        let keys: Vec<u64> = self.sim.mem.cells.keys().copied().collect();
-        let closest_idx = keys.iter().position(|&k| k >= target_addr).unwrap_or(keys.len().saturating_sub(1));
+        let closest_idx = keys
+            .iter()
+            .position(|&k| k >= target_addr)
+            .unwrap_or(keys.len().saturating_sub(1));
         self.scroll_mem = closest_idx;
         self.status = format!("Jumped memory view to 0x{target_addr:016x}");
         self.needs_full_clear = true;
     }
 
     pub fn jump_mem_to_sp(&mut self) {
-        let sp = self.sim.regs.read_x(2);
-        self.jump_mem_to_address(sp);
+        self.jump_mem_to_address(self.machine.sp());
     }
 
     pub fn mark_changed_regs(&mut self) {
+        let changes: RegisterChanges = self.machine.changes_since(&self.last_snapshot);
         for i in 0..32 {
-            self.changed_x[i] = self.sim.regs.x_values()[i] != self.last_regs.x[i];
-            self.changed_f[i] = self.sim.regs.f_values()[i] != self.last_regs.f[i];
+            self.changed_x[i] = changes.x(i);
+            self.changed_f[i] = changes.f(i);
         }
     }
 
@@ -560,13 +502,14 @@ impl App {
     pub fn run_chunk(&mut self, budget: Duration) {
         let start = Instant::now();
         let mut first = true;
-        while !self.sim.brk {
-            if (!first || !self.at_breakpoint) && self.breakpoints.contains(&self.sim.regs.pc) {
+        while !self.machine.stop_requested() {
+            let pc = self.machine.pc();
+            if (!first || !self.at_breakpoint) && self.breakpoints.contains(&pc) {
                 self.running = false;
                 self.was_running = false;
                 self.mode = Mode::Normal;
                 self.at_breakpoint = true;
-                self.status = format!("Breakpoint hit at 0x{:016x}", self.sim.regs.pc);
+                self.status = format!("Breakpoint hit at 0x{pc:016x}");
                 break;
             }
             self.at_breakpoint = false;
@@ -574,15 +517,15 @@ impl App {
             if start.elapsed() >= budget {
                 break;
             }
-            match step(&mut self.sim) {
-                StepResult::Continued => {}
-                StepResult::Halted => {
+            match self.machine.step() {
+                StepOutcome::Continued => {}
+                StepOutcome::Halted => {
                     self.running = false;
                     self.was_running = false;
                     self.mode = Mode::Normal;
                     break;
                 }
-                StepResult::WaitingForInput => {
+                StepOutcome::WaitingForInput => {
                     self.mode = Mode::Input;
                     self.focus = Pane::Inp;
                     self.was_running = true;
@@ -591,22 +534,17 @@ impl App {
                 }
             }
         }
-        if self.sim.brk {
-            self.sim.exec_log.push_str("ERROR: Stopped");
-            self.sim.brk = false;
+        if self.machine.stop_requested() {
+            self.machine.append_log("ERROR: Stopped");
+            self.machine.clear_stop_request();
             self.running = false;
             self.was_running = false;
             self.mode = Mode::Normal;
         }
-        if self.sim.view.dma_out {
-            poll_dma_output(&mut self.sim);
-        }
-        if self.sim.view.dma_inp {
-            poll_dma_input(&mut self.sim);
-            if !self.sim.entry_type.is_empty() && self.mode != Mode::Input {
-                self.mode = Mode::Input;
-                self.focus = Pane::Inp;
-            }
+        self.machine.poll_dma(self.view.dma_out, self.view.dma_inp);
+        if self.machine.input_active() && self.mode != Mode::Input {
+            self.mode = Mode::Input;
+            self.focus = Pane::Inp;
         }
         self.mark_changed_regs();
     }
@@ -614,12 +552,7 @@ impl App {
     pub fn cancel_input(&mut self) {
         self.was_running = false;
         self.running = false;
-        if self.sim.pending.take().is_some() {
-            self.sim.output.push_str("Cancelled\n");
-            self.sim.exec_log.push_str("ERROR: Cancelled\n");
-        }
-        self.sim.entry_type.clear();
-        self.sim.inp_prompt = false;
+        self.machine.cancel_input();
         self.input_line.clear();
         self.mode = Mode::Normal;
         self.focus = Pane::Listing;
@@ -630,24 +563,11 @@ impl App {
         let resume = self.was_running;
         self.was_running = false;
 
-        if self.sim.pending.is_some() {
-            let inst_pc = self.sim.pending.as_ref().map(|p| p.inst_pc).unwrap_or(0);
-            if let Err(e) = submit_ecall_input(&mut self.sim, &line) {
-                self.sim.regs.pc = inst_pc;
-                self.sim.exec_log.push_str(&format!("ERROR: {}\n", e.0));
-                self.running = false;
-                self.mode = Mode::Normal;
-                self.focus = Pane::Listing;
-                return;
-            }
-        } else if !self.sim.entry_type.is_empty() {
-            if let Err(e) = submit_dma_input(&mut self.sim, &line) {
-                self.sim.exec_log.push_str(&format!("ERROR: {}\n", e.0));
-                self.running = false;
-                self.mode = Mode::Normal;
-                self.focus = Pane::Listing;
-                return;
-            }
+        if self.machine.submit_input(&line).is_err() {
+            self.running = false;
+            self.mode = Mode::Normal;
+            self.focus = Pane::Listing;
+            return;
         }
 
         if resume {
@@ -719,7 +639,7 @@ impl App {
                 }
                 Some(Ok(entry)) => entry,
             };
-            match rvs_format::run_batch_file(&asm, &input, &out, timeout) {
+            match self.machine.run_batch_file(&asm, &input, &out, timeout) {
                 Ok(()) => {}
                 Err(e) => log.push_str(&format!("#{e}\n")),
             }
@@ -820,9 +740,6 @@ impl App {
 
     // ----- input events -------------------------------------------------
 
-}
-
-impl App {
     pub fn request_quit(&mut self) {
         if self.editor.needs_save() {
             self.modal = Modal::ConfirmSave(ConfirmAction::Quit);
@@ -833,17 +750,31 @@ impl App {
     }
 
     pub fn changed_x(&self, i: usize) -> bool {
-        self.changed_x[i]
+        self.changed_x.get(i).copied().unwrap_or(false)
     }
 
     pub fn changed_f(&self, i: usize) -> bool {
-        self.changed_f[i]
+        self.changed_f.get(i).copied().unwrap_or(false)
     }
 
     pub fn blink_on(&self) -> bool {
         (self.tick / 4) % 2 == 0
     }
 
+    /// Dialect exposed to command handlers without importing the backend.
+    pub fn dialect(&self) -> Dialect {
+        self.machine.dialect()
+    }
+
+    /// `:transpile` helper: convert the buffer and switch dialect.
+    pub fn transpile_buffer(&mut self) {
+        let target = self.machine.dialect().toggle();
+        let src = self.editor.text();
+        if let Some(text) = self.machine.transpile(&src, target) {
+            self.editor.replace_text(&text);
+            self.machine.set_dialect(target);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -866,6 +797,8 @@ mod tests {
     #[test]
     fn batch_entry_short_lines_are_skipped_and_bad_quotes_reported() {
         assert!(parse_batch_entry("a.asm in.txt").is_none());
-        assert!(parse_batch_entry(r#""a.asm in.txt out.txt"#).unwrap().is_err());
+        assert!(parse_batch_entry(r#""a.asm in.txt out.txt"#)
+            .unwrap()
+            .is_err());
     }
 }

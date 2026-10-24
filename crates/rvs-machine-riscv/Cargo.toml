@@ -1,0 +1,19 @@
+[package]
+name = "rvs-machine-riscv"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rvs-machine = { path = "../rvs-machine" }
+rvs-sim = { path = "../rvs-sim" }
+rvs-syntax = { path = "../rvs-syntax" }
+rvs-assembler = { path = "../rvs-assembler" }
+rvs-executor = { path = "../rvs-executor" }
+rvs-ecall = { path = "../rvs-ecall" }
+rvs-memory = { path = "../rvs-memory" }
+rvs-asm-syntax = { path = "../rvs-asm-syntax" }
+rvs-regs = { path = "../rvs-regs" }
+rvs-tcl = { path = "../rvs-tcl" }
+rvs-transpile = { path = "../rvs-transpile" }
+rvs-format = { path = "../rvs-format" }

@@ -8,5 +8,4 @@ authors.workspace = true
 [dependencies]
 rvs-asm-syntax = { path = "../rvs-asm-syntax" }
 rvs-regs = { path = "../rvs-regs" }
-ratatui = { workspace = true }
-rvs-theme = { path = "../rvs-theme" }
+rvs-machine = { path = "../rvs-machine" }

@@ -2,6 +2,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use rvs_machine::Machine;
 use rvs_app::{App, FileAction, Modal, Mode, Pane};
 use rvs_app_cmds::AppCommands;
 
@@ -14,7 +15,7 @@ pub trait AppKeys {
     fn on_key_modal(&mut self, key: KeyEvent);
 }
 
-impl AppKeys for App {
+impl<M: Machine> AppKeys for App<M> {
     // ----- input events -------------------------------------------------
 
     fn on_key(&mut self, key: KeyEvent) {

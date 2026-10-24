@@ -7,9 +7,9 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
 use rvs_app::{App, ConfirmAction, FileAction, Modal};
-use rvs_ui_panes::expand_tabs;
+use rvs_machine::{expand_tabs, Machine};
 
-pub fn draw_modal(f: &mut Frame, app: &mut App, area: Rect) {
+pub fn draw_modal<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
     match &app.modal {
         Modal::About => {
             let modal_area = centered_rect(80, 84, area);
@@ -326,8 +326,8 @@ pub fn draw_modal(f: &mut Frame, app: &mut App, area: Rect) {
             let inner = block.inner(modal_area);
             f.render_widget(block, modal_area);
 
-            let m = &app.sim.metrics;
-            let cc = &app.sim.convention;
+            let m = app.machine.metrics();
+            let cc = app.machine.convention();
             let mut text = vec![
                 Line::styled("Hardware Counters & Dynamic Profiling", rvs_theme::HEADING),
                 Line::raw(""),
@@ -337,7 +337,7 @@ pub fn draw_modal(f: &mut Frame, app: &mut App, area: Rect) {
                     Span::styled("Estimated Cycles: ", rvs_theme::SECONDARY),
                     Span::styled(format!("{:<10}", m.cycles), rvs_theme::OK),
                     Span::styled("Average CPI: ", rvs_theme::SECONDARY),
-                    Span::styled(format!("{:.2}", m.cpi()), rvs_theme::HEADING),
+                    Span::styled(format!("{:.2}", m.cpi as f64 / 100.0), rvs_theme::HEADING),
                 ]),
                 Line::raw(""),
                 Line::styled("Instruction Mix Breakdown:", rvs_theme::INFO),
@@ -365,7 +365,7 @@ pub fn draw_modal(f: &mut Frame, app: &mut App, area: Rect) {
                     Span::styled("Branches Taken:   ", rvs_theme::MUTED),
                     Span::styled(format!("{:<8}", m.branches_taken), rvs_theme::OK_PLAIN),
                     Span::styled("Taken Rate:       ", rvs_theme::MUTED),
-                    Span::styled(format!("{:.1}%", m.branch_taken_rate()), rvs_theme::HEADING),
+                    Span::styled(format!("{:.1}%", m.taken_rate as f64 / 10.0), rvs_theme::HEADING),
                 ]),
                 Line::raw(""),
                 Line::styled("Calling Convention Compliance Checker:", rvs_theme::INFO),
@@ -373,7 +373,7 @@ pub fn draw_modal(f: &mut Frame, app: &mut App, area: Rect) {
                     Span::styled("  Checker Status:       ", rvs_theme::MUTED),
                     Span::styled(if cc.enabled { "ENABLED (Active)" } else { "DISABLED" }, if cc.enabled { rvs_theme::OK } else { rvs_theme::MUTED }),
                     Span::styled("   Call Stack Depth: ", rvs_theme::MUTED),
-                    Span::styled(format!("{:<4}", cc.call_stack.len()), rvs_theme::TEXT_STYLE),
+                    Span::styled(format!("{:<4}", cc.depth), rvs_theme::TEXT_STYLE),
                     Span::styled("Violations: ", rvs_theme::MUTED),
                     Span::styled(format!("{}", cc.violations.len()), if cc.violations.is_empty() { rvs_theme::OK_PLAIN } else { rvs_theme::ERR }),
                 ]),
@@ -407,9 +407,10 @@ pub fn draw_modal(f: &mut Frame, app: &mut App, area: Rect) {
             let inner = block.inner(modal_area);
             f.render_widget(block, modal_area);
 
-            let frames = app.sim.get_stack_frames();
-            let cur_sp = app.sim.regs.read_x(2);
-            let is_aligned = cur_sp % 16 == 0;
+            let stack = app.machine.stack();
+            let frames = stack.frames;
+            let cur_sp = stack.sp;
+            let is_aligned = stack.aligned;
 
             let mut text = vec![
                 Line::styled("Active Call Frames & Stack Hierarchy", rvs_theme::HEADING),
