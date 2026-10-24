@@ -30,10 +30,8 @@ impl Editor {
 
     pub fn set_text(&mut self, text: &str) {
         self.lines = text.lines().map(|l| l.to_string()).collect();
-        if text.is_empty() {
+        if self.lines.is_empty() {
             self.lines = vec![String::new()];
-        } else if text.ends_with('\n') {
-            self.lines.push(String::new());
         }
         self.row = 0;
         self.col = 0;
@@ -41,6 +39,16 @@ impl Editor {
         self.offset_col = 0;
         self.undo.clear();
         self.redo.clear();
+    }
+
+    pub fn replace_text(&mut self, text: &str) {
+        self.push_undo();
+        self.lines = text.lines().map(|l| l.to_string()).collect();
+        if self.lines.is_empty() {
+            self.lines = vec![String::new()];
+        }
+        self.modified = true;
+        self.clamp_cursor();
     }
 
     pub fn text(&self) -> String {

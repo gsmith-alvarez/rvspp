@@ -1515,7 +1515,7 @@ impl App {
                 } else {
                     rvs_core::transpiler::transpile_gnu_to_rvs(&src)
                 };
-                self.editor.set_text(&transpiled);
+                self.editor.replace_text(&transpiled);
                 self.status = format!("Transpiled buffer to {} format", if is_gnu_target { "GNU" } else { "RVS" });
                 self.needs_full_clear = true;
             }

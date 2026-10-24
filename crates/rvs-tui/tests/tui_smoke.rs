@@ -835,6 +835,15 @@ helper:
     assert!(gnu_buf.contains("li a0, 42"));
     assert!(gnu_buf.contains("mv a1, a0"));
     assert!(gnu_buf.contains("ret"));
+
+    // 3. Verify repeatedly running transpiler does NOT add spurious newlines
+    let line_count_before = app.editor.lines.len();
+    app.command_input = ":tp rvs".to_string();
+    app.execute_command();
+    assert_eq!(app.editor.lines.len(), line_count_before, "Transpiler must not add extra newlines");
+    app.command_input = ":tp gnu".to_string();
+    app.execute_command();
+    assert_eq!(app.editor.lines.len(), line_count_before, "Transpiler must not add extra newlines");
 }
 
 #[test]
