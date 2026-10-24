@@ -9,17 +9,17 @@ RVS++ takes the classic 2019 educational simulator (`RVS046.tcl`) used in univer
 
 <img width="1908" height="1125" alt="screenshot_20261023_222058-region" src="https://github.com/user-attachments/assets/fa067b96-4a4c-4501-a2c2-fd79ea00e767" />
 
-Listing Pane
+### Listing Pane
 <img width="1898" height="1103" alt="screenshot_20261023_222112-region" src="https://github.com/user-attachments/assets/63ce30bb-47a9-40b7-a8e8-8d9c219952a7" />
 
 
-Exec Pane
+### Exec Pane
 <img width="950" height="1105" alt="screenshot_20261023_222127-region" src="https://github.com/user-attachments/assets/55c05bc1-a36b-4000-85b8-39bda571daad" />
 
-Mem Pane:
+### Mem Pane:
 <img width="1910" height="370" alt="screenshot_20261023_222205-region" src="https://github.com/user-attachments/assets/cb4c17d9-b5bf-4f6b-9414-f3ca913e177c" />
 
-Transpiling:
+### Transpiling:
 <img width="1904" height="1122" alt="image" src="https://github.com/user-attachments/assets/98ae92b9-0e35-49b7-a206-5bae67db977f" />
 
 ---
