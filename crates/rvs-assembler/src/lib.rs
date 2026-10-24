@@ -830,10 +830,14 @@ pub fn dump(sim: &mut Simulator) -> String {
                 res.push('\n');
             }
             Some(MemoryCell::Instruction(cell)) => {
-                let enc = encode(&cell.op, &cell.args, addr, &sim.sym);
+                let enc = encode(&cell.op, &cell.raw_args, addr, &sim.sym);
                 let new_op = enc.asmx.first().cloned().unwrap_or_default();
                 let new_args: Vec<String> = enc.asmx.iter().skip(1).cloned().collect();
-                sim.mem.insert_instruction(addr, &new_op, new_args.clone(), &cell.source_line);
+                if let Some(rvs_memory::MemoryCell::Instruction(c)) = sim.mem.cells.get_mut(&addr)
+                {
+                    c.op = new_op.clone();
+                    c.args = new_args.clone();
+                }
                 res.push_str(&addr_hex);
                 if sim.view.list_bin {
                     res.push(' ');

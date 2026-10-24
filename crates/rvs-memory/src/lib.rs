@@ -17,7 +17,10 @@ use rvs_tcl as tcl;
 #[derive(Clone, Debug)]
 pub struct InstructionCell {
     pub op: String,
+    /// Normalized operands (Tcl-facing form, rewritten by `dump`).
     pub args: Vec<String>,
+    /// Operands exactly as written, kept so `dump` stays idempotent.
+    pub raw_args: Vec<String>,
     pub source_line: String,
 }
 
@@ -413,6 +416,7 @@ impl Memory {
             addr,
             MemoryCell::Instruction(InstructionCell {
                 op: op.to_string(),
+                raw_args: args.clone(),
                 args,
                 source_line: source_line.to_string(),
             }),

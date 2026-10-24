@@ -554,7 +554,7 @@ impl RiscV {
                     }
                 }
                 MemoryCell::Instruction(inst) => {
-                    let enc = rvs_assembler::encode(&inst.op, &inst.args, addr, &self.sim.sym);
+                    let enc = rvs_assembler::encode(&inst.op, &inst.raw_args, addr, &self.sim.sym);
                     let fmt_tag = enc.bin.split_whitespace().next();
                     if req.flags.list_bin {
                         push_sep(&mut segs);
