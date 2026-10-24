@@ -128,6 +128,20 @@ cargo install --path crates/rvs-tui
 rvs solution.s
 ```
 
+### 5. Uninstall
+```bash
+# If installed via Cargo:
+cargo uninstall rvs-tui
+
+# If binaries were copied manually:
+rm -f ~/.local/bin/rvs ~/.local/bin/rvspp        # or /usr/local/bin/rvs /usr/local/bin/rvspp
+```
+
+To remove residual crash recovery buffers (if any):
+```bash
+rm -rf ~/.local/share/rvs                      # macOS: ~/Library/Application\ Support/rvs
+```
+
 ---
 
 ## Running on Nix / NixOS
