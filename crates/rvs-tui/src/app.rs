@@ -109,6 +109,7 @@ pub enum Modal {
     FilePrompt(FileAction),
     ConfirmSave(ConfirmAction),
     About,
+    Stats,
 }
 
 
@@ -231,6 +232,7 @@ impl App {
             }
         }
         sim.source = editor.text();
+        sim.convention.enabled = true;
         Self {
             sim,
             editor,
@@ -274,7 +276,9 @@ impl App {
 
     pub fn reset_sim_panes(&mut self) {
         let view = self.sim.view.clone();
+        let conv_enabled = self.sim.convention.enabled;
         self.sim = Simulator::new();
+        self.sim.convention.enabled = conv_enabled;
         self.sim.view = view;
         self.sim.source = self.editor.text();
         self.running = false;
@@ -302,6 +306,8 @@ impl App {
         self.sim.pending = None;
         self.sim.entry_type.clear();
         self.input_line.clear();
+        self.sim.convention.reset();
+        self.sim.metrics.reset();
         match rvs_core::assembler::assemble(&mut self.sim, &src) {
             Ok(listing) => {
                 self.sim.listing = format!("{listing}\n");
@@ -364,6 +370,8 @@ impl App {
         self.sim.exec_log.push_str("START\n");
         self.sim.inp_prompt = false;
         self.at_breakpoint = false;
+        self.sim.convention.reset();
+        self.sim.metrics.reset();
         self.running = true;
         self.was_running = false;
         self.mode = Mode::Running;
@@ -1441,6 +1449,24 @@ impl App {
             "cb" | "clearbreaks" => {
                 self.clear_all_breakpoints();
             }
+            "stats" | "stat" | "metrics" => {
+                self.modal = Modal::Stats;
+                self.needs_full_clear = true;
+            }
+            "cc" | "convention" => {
+                if args == "on" {
+                    self.sim.convention.enabled = true;
+                } else if args == "off" {
+                    self.sim.convention.enabled = false;
+                } else {
+                    self.sim.convention.enabled = !self.sim.convention.enabled;
+                }
+                self.status = format!(
+                    "Calling convention checker: {}",
+                    if self.sim.convention.enabled { "ON" } else { "OFF" }
+                );
+                self.needs_full_clear = true;
+            }
             "p" | "prev" | "back" | "stepback" => {
                 self.action_step_back();
             }
@@ -1495,7 +1521,7 @@ impl App {
 
     fn on_key_modal(&mut self, key: KeyEvent) {
         match (&self.modal, key.code) {
-            (Modal::About, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) => {
+            (Modal::About | Modal::Stats, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) => {
                 self.modal = Modal::None;
                 self.needs_full_clear = true;
             }
@@ -1734,6 +1760,18 @@ impl App {
                 } else {
                     self.status = "DMA INP requires INPC (0x10) and INPD (0x18) labels in source".to_string();
                 }
+            }
+            (Pane::Exec, 1) => {
+                self.modal = Modal::Stats;
+                self.needs_full_clear = true;
+            }
+            (Pane::Exec, 2) => {
+                self.sim.convention.enabled = !self.sim.convention.enabled;
+                self.status = format!(
+                    "Calling convention checker: {}",
+                    if self.sim.convention.enabled { "ON" } else { "OFF" }
+                );
+                self.needs_full_clear = true;
             }
             _ => {}
         }

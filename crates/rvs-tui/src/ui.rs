@@ -905,6 +905,11 @@ fn draw_exec(f: &mut Frame, app: &mut App, area: Rect) {
                 clean_line,
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ));
+        } else if clean_line.starts_with("WARN") {
+            lines.push(Line::styled(
+                clean_line,
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            ));
         } else if clean_line.starts_with("ebreak") {
             lines.push(Line::styled(
                 clean_line,
@@ -931,7 +936,12 @@ fn draw_exec(f: &mut Frame, app: &mut App, area: Rect) {
     }
     f.render_widget(Paragraph::new(lines), text_area);
 
-    let toolbar = Line::from(vec![btn("Clear")]);
+    let cc_label = if app.sim.convention.enabled { "CC:ON" } else { "CC:OFF" };
+    let toolbar = Line::from(vec![
+        btn("Clear"),
+        btn("STATS"),
+        pill(cc_label, app.sim.convention.enabled),
+    ]);
     f.render_widget(Paragraph::new(toolbar), toolbar_area);
 }
 
@@ -1321,6 +1331,86 @@ fn draw_modal(f: &mut Frame, app: &mut App, area: Rect) {
             }
         }
         Modal::None => {}
+        Modal::Stats => {
+            let modal_area = centered_rect(76, 75, area);
+            f.render_widget(Clear, modal_area);
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Double)
+                .border_style(Style::default().fg(Color::Cyan))
+                .title(" Execution Metrics & Hardware Counters (:stats) ");
+            let inner = block.inner(modal_area);
+            f.render_widget(block, modal_area);
+
+            let m = &app.sim.metrics;
+            let cc = &app.sim.convention;
+            let mut text = vec![
+                Line::styled("Hardware Counters & Dynamic Profiling", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Line::raw(""),
+                Line::from(vec![
+                    Span::styled("  Total Instructions:   ", Style::default().fg(Color::Cyan)),
+                    Span::styled(format!("{:<10}", m.instructions), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("Estimated Cycles: ", Style::default().fg(Color::Cyan)),
+                    Span::styled(format!("{:<10}", m.cycles), Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD)),
+                    Span::styled("Average CPI: ", Style::default().fg(Color::Cyan)),
+                    Span::styled(format!("{:.2}", m.cpi()), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                ]),
+                Line::raw(""),
+                Line::styled("Instruction Mix Breakdown:", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Line::from(vec![
+                    Span::styled("  ALU / Arithmetic:     ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{:<8}", m.alu_ops), Style::default().fg(Color::White)),
+                    Span::styled("Memory Loads:     ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{:<8}", m.loads), Style::default().fg(Color::LightBlue)),
+                    Span::styled("Memory Stores:    ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{:<8}", m.stores), Style::default().fg(Color::LightBlue)),
+                ]),
+                Line::from(vec![
+                    Span::styled("  Control Jumps:        ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{:<8}", m.jumps), Style::default().fg(Color::White)),
+                    Span::styled("Floating Point:   ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{:<8}", m.floats), Style::default().fg(Color::Yellow)),
+                    Span::styled("Syscalls (ECALL): ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{:<8}", m.ecalls), Style::default().fg(Color::Magenta)),
+                ]),
+                Line::raw(""),
+                Line::styled("Branch Prediction Statistics:", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Line::from(vec![
+                    Span::styled("  Total Branches:       ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{:<8}", m.branches_total), Style::default().fg(Color::White)),
+                    Span::styled("Branches Taken:   ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{:<8}", m.branches_taken), Style::default().fg(Color::LightGreen)),
+                    Span::styled("Taken Rate:       ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{:.1}%", m.branch_taken_rate()), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                ]),
+                Line::raw(""),
+                Line::styled("Calling Convention Compliance Checker:", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Line::from(vec![
+                    Span::styled("  Checker Status:       ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(if cc.enabled { "ENABLED (Active)" } else { "DISABLED" }, if cc.enabled { Style::default().fg(Color::Green).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::DarkGray) }),
+                    Span::styled("   Call Stack Depth: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{:<4}", cc.call_stack.len()), Style::default().fg(Color::White)),
+                    Span::styled("Violations: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{}", cc.violations.len()), if cc.violations.is_empty() { Style::default().fg(Color::Green) } else { Style::default().fg(Color::Red).add_modifier(Modifier::BOLD) }),
+                ]),
+            ];
+
+            if !cc.violations.is_empty() {
+                text.push(Line::raw(""));
+                text.push(Line::styled("  Recent Convention Violations:", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)));
+                for v in cc.violations.iter().rev().take(5) {
+                    text.push(Line::styled(format!("    ! {v}"), Style::default().fg(Color::LightRed)));
+                }
+            } else if cc.enabled {
+                text.push(Line::raw(""));
+                text.push(Line::styled("  ✓ No calling convention violations detected (saved registers & stack aligned).", Style::default().fg(Color::Green)));
+            }
+
+            text.push(Line::raw(""));
+            text.push(Line::styled("Press Esc or Enter to close.", Style::default().fg(Color::DarkGray)));
+
+            f.render_widget(Paragraph::new(text).wrap(Wrap { trim: true }), inner);
+        }
     }
 }
 
@@ -1425,7 +1515,13 @@ pub fn handle_click(app: &mut App, col: u16, row: u16) {
                     }
                 }
                 Pane::Exec => {
-                    app.clear_pane(Pane::Exec);
+                    if rel_x < 9 {
+                        app.clear_pane(Pane::Exec);
+                    } else if rel_x >= 9 && rel_x < 18 {
+                        app.toggle_pane_option(Pane::Exec, 1);
+                    } else if rel_x >= 18 && rel_x < 28 {
+                        app.toggle_pane_option(Pane::Exec, 2);
+                    }
                 }
                 Pane::Out => {
                     if rel_x < 9 {

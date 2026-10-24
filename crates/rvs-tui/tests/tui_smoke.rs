@@ -726,3 +726,61 @@ fn test_tier1_debugging_features() {
     app.toggle_pane_option(Pane::Mem, 5);
     assert!(app.status.contains("Jumped memory view to 0x0000000000002000"));
 }
+
+#[test]
+fn test_tier2_execution_metrics_and_calling_convention() {
+    let backend = TestBackend::new(140, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    let mut app = App::new(None);
+    let src = "START: addi sp, x0, 8\njal ra, func\nebreak x0, x0, 0\nfunc: addi s0, x0, 99\njalr x0, ra, 0\n";
+    app.editor.set_text(src);
+    app.compile();
+    assert!(app.sim.convention.enabled);
+
+    // Run to completion
+    app.action_start();
+    while app.running {
+        app.run_chunk(std::time::Duration::from_millis(50));
+    }
+
+    // 1. Verify metrics counter accumulated accurately
+    let m = &app.sim.metrics;
+    assert!(m.instructions >= 4, "Should execute at least 4 instructions");
+    assert!(m.cycles >= m.instructions, "Cycles should equal or exceed instruction count");
+    assert_eq!(m.jumps, 2, "Should record 2 jumps (jal + jalr)");
+
+    // 2. Verify calling convention checker caught both violations
+    let cc = &app.sim.convention;
+    assert!(cc.violations.len() >= 2, "Must detect stack misalignment and saved register clobber");
+    assert!(cc.violations.iter().any(|v| v.contains("Stack pointer sp is not 16-byte aligned")));
+    assert!(cc.violations.iter().any(|v| v.contains("Saved register s0 was modified")));
+
+    // Execution log should contain WARN messages
+    assert!(app.sim.exec_log.contains("WARN [Convention]:"));
+
+    // 3. Open :stats modal and verify rendered output
+    app.command_input = ":stats".to_string();
+    app.execute_command();
+    assert_eq!(app.modal, Modal::Stats);
+
+    terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+    let frame = terminal.backend().to_string();
+    assert!(frame.contains("Execution Metrics & Hardware Counters"));
+    assert!(frame.contains("Total Instructions:"));
+    assert!(frame.contains("Average CPI:"));
+    assert!(frame.contains("Calling Convention Compliance Checker"));
+    assert!(frame.contains("Recent Convention Violations:"));
+
+    // Close stats modal with Esc
+    app.on_key(key(KeyCode::Esc));
+    assert_eq!(app.modal, Modal::None);
+
+    // 4. Test toggling convention checker with command :cc off / :cc on
+    app.command_input = ":cc off".to_string();
+    app.execute_command();
+    assert!(!app.sim.convention.enabled);
+    app.command_input = ":cc on".to_string();
+    app.execute_command();
+    assert!(app.sim.convention.enabled);
+}

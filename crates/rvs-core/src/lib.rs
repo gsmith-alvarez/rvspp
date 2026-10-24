@@ -58,6 +58,151 @@ impl Default for ViewConfig {
         }
     }
 }
+/// Dynamic execution metrics and hardware counter statistics.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ExecutionMetrics {
+    pub instructions: u64,
+    pub cycles: u64,
+    pub alu_ops: u64,
+    pub branches_total: u64,
+    pub branches_taken: u64,
+    pub jumps: u64,
+    pub loads: u64,
+    pub stores: u64,
+    pub floats: u64,
+    pub ecalls: u64,
+}
+
+impl ExecutionMetrics {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    pub fn cpi(&self) -> f64 {
+        if self.instructions == 0 {
+            0.0
+        } else {
+            self.cycles as f64 / self.instructions as f64
+        }
+    }
+
+    pub fn branch_taken_rate(&self) -> f64 {
+        if self.branches_total == 0 {
+            0.0
+        } else {
+            (self.branches_taken as f64 / self.branches_total as f64) * 100.0
+        }
+    }
+}
+
+/// A recorded stack frame for calling convention linting.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CallFrame {
+    pub call_pc: u64,
+    pub entry_sp: u64,
+    pub saved_x: [u64; 12],
+    pub saved_f: [u64; 12],
+}
+
+/// Standard RISC-V calling convention checker / linter.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ConventionChecker {
+    pub enabled: bool,
+    pub call_stack: Vec<CallFrame>,
+    pub violations: Vec<String>,
+}
+
+impl ConventionChecker {
+    pub const SAVED_X_INDICES: [u8; 12] = [8, 9, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27];
+
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn reset(&mut self) {
+        self.call_stack.clear();
+        self.violations.clear();
+    }
+
+    pub fn on_call(&mut self, call_pc: u64, regs: &RegisterFile) -> Option<String> {
+        let sp = regs.read_x(2);
+        let mut warning = None;
+        if sp % 16 != 0 {
+            let msg = format!("Stack pointer sp is not 16-byte aligned at call 0x{:016x} (sp = 0x{:016x})", call_pc, sp);
+            self.violations.push(msg.clone());
+            warning = Some(msg);
+        }
+
+        let mut saved_x = [0u64; 12];
+        for (i, &idx) in Self::SAVED_X_INDICES.iter().enumerate() {
+            saved_x[i] = regs.read_x(idx);
+        }
+        let mut saved_f = [0u64; 12];
+        for (i, &idx) in Self::SAVED_X_INDICES.iter().enumerate() {
+            saved_f[i] = regs.read_f_bits(idx);
+        }
+
+        self.call_stack.push(CallFrame {
+            call_pc,
+            entry_sp: sp,
+            saved_x,
+            saved_f,
+        });
+
+        warning
+    }
+
+    pub fn on_return(&mut self, ret_pc: u64, regs: &RegisterFile) -> Vec<String> {
+        let mut warnings = Vec::new();
+        let Some(frame) = self.call_stack.pop() else {
+            return warnings;
+        };
+
+        let sp = regs.read_x(2);
+        if sp != frame.entry_sp {
+            let msg = format!(
+                "Stack pointer sp was not restored upon return at 0x{:016x} (entered at 0x{:016x}, returned at 0x{:016x})",
+                ret_pc, frame.entry_sp, sp
+            );
+            self.violations.push(msg.clone());
+            warnings.push(msg);
+        }
+
+        for (i, &idx) in Self::SAVED_X_INDICES.iter().enumerate() {
+            let cur = regs.read_x(idx);
+            let prev = frame.saved_x[i];
+            if cur != prev {
+                let abi = crate::registers::abi_name(idx);
+                let msg = format!(
+                    "Saved register {} was modified and not restored before return at 0x{:016x} (entered: 0x{:016x}, returned: 0x{:016x})",
+                    abi, ret_pc, prev, cur
+                );
+                self.violations.push(msg.clone());
+                warnings.push(msg);
+            }
+        }
+
+        for (i, &idx) in Self::SAVED_X_INDICES.iter().enumerate() {
+            let cur = regs.read_f_bits(idx);
+            let prev = frame.saved_f[i];
+            if cur != prev {
+                let msg = format!(
+                    "Saved float register f{} was modified and not restored before return at 0x{:016x} (entered: 0x{:016x}, returned: 0x{:016x})",
+                    idx, ret_pc, prev, cur
+                );
+                self.violations.push(msg.clone());
+                warnings.push(msg);
+            }
+        }
+
+        warnings
+    }
+}
+
 
 /// The complete simulator state, mirroring the Tcl globals.
 #[derive(Debug)]
@@ -88,6 +233,10 @@ pub struct Simulator {
     pub line_to_addr: BTreeMap<usize, u64>,
     /// Mapping from instruction/data address to source line index (0-based).
     pub addr_to_line: BTreeMap<u64, usize>,
+    /// Dynamic execution metrics & hardware counters.
+    pub metrics: ExecutionMetrics,
+    /// Calling convention compliance checker.
+    pub convention: ConventionChecker,
 }
 
 impl Default for Simulator {
@@ -108,6 +257,8 @@ impl Default for Simulator {
             brk: false,
             line_to_addr: BTreeMap::new(),
             addr_to_line: BTreeMap::new(),
+            metrics: ExecutionMetrics::default(),
+            convention: ConventionChecker::default(),
         }
     }
 }

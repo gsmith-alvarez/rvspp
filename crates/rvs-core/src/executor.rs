@@ -1094,15 +1094,29 @@ pub fn step(sim: &mut Simulator) -> StepResult {
     }
     trace.push('\n');
     sim.exec_log.push_str(&trace);
+    let op_upper = op.to_ascii_uppercase();
+    let is_call = match op_upper.as_str() {
+        "JAL" => args.first().map(|r| r != "x0" && r != "zero").unwrap_or(false),
+        "JALR" => args.first().map(|r| r != "x0" && r != "zero").unwrap_or(false),
+        _ => false,
+    };
+    if is_call && sim.convention.enabled {
+        if let Some(w) = sim.convention.on_call(inst_pc, &sim.regs) {
+            sim.exec_log.push_str(&format!("WARN [Convention]: {w}\n"));
+        }
+    }
 
-    match execute(sim, &op, &args) {
+    let is_ret = op_upper == "JALR"
+        && args.first().map(|r| r == "x0" || r == "zero").unwrap_or(false)
+        && args.get(1).map(|r| r == "x1" || r == "ra").unwrap_or(false);
+
+    let step_res = match execute(sim, &op, &args) {
         Ok(false) => StepResult::Continued,
         Ok(true) => StepResult::WaitingForInput,
         Err(e) => {
             let is_ebreak = e.0 == "ebreak\n";
             if is_ebreak {
                 sim.exec_log.push_str("ebreak\n");
-                // Tcl's catch rewinds PC by 4 after EBREAK already advanced.
                 sim.regs.pc = sim.regs.pc.wrapping_sub(4);
             } else {
                 sim.exec_log.push_str(&format!("ERROR: {}\n", e.0));
@@ -1110,7 +1124,53 @@ pub fn step(sim: &mut Simulator) -> StepResult {
             }
             StepResult::Halted
         }
+    };
+
+    if is_ret && sim.convention.enabled {
+        for w in sim.convention.on_return(inst_pc, &sim.regs) {
+            sim.exec_log.push_str(&format!("WARN [Convention]: {w}\n"));
+        }
     }
+
+    // Update execution metrics
+    sim.metrics.instructions += 1;
+    sim.metrics.cycles += 1;
+    match op_upper.as_str() {
+        "BEQ" | "BNE" | "BLT" | "BGE" | "BLTU" | "BGEU" => {
+            sim.metrics.branches_total += 1;
+            if sim.regs.pc != inst_pc.wrapping_add(4) {
+                sim.metrics.branches_taken += 1;
+                sim.metrics.cycles += 1;
+            }
+        }
+        "JAL" | "JALR" => {
+            sim.metrics.jumps += 1;
+        }
+        "LD" | "LW" | "LH" | "LB" | "LWU" | "LHU" | "LBU" | "FLD" => {
+            sim.metrics.loads += 1;
+            sim.metrics.cycles += 1;
+        }
+        "SD" | "SW" | "SH" | "SB" | "FSD" => {
+            sim.metrics.stores += 1;
+        }
+        "MUL" | "MULH" | "MULHSU" | "MULHU" | "DIV" | "DIVU" | "REM" | "REMU"
+        | "MULW" | "DIVW" | "DIVUW" | "REMW" | "REMUW" => {
+            sim.metrics.alu_ops += 1;
+            sim.metrics.cycles += 2;
+        }
+        "ECALL" => {
+            sim.metrics.ecalls += 1;
+            sim.metrics.cycles += 4;
+        }
+        _ if op_upper.starts_with('F') => {
+            sim.metrics.floats += 1;
+        }
+        _ => {
+            sim.metrics.alu_ops += 1;
+        }
+    }
+
+    step_res
 }
 
 /// `RunCmd` body: loop steps until halt, timeout, or an input request.
