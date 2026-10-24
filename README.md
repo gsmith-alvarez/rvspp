@@ -1,409 +1,283 @@
-# RVS++ — RISC-V Visual Simulator++ (RV64IMFD)
+# RVS++ (RISC-V Visual Simulator++)
 
 [![Release](https://img.shields.io/badge/version-1.0.0-cyan.svg)](https://github.com/gsmith-alvarez/rvs/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Vibe-Ware](https://img.shields.io/badge/status-vibe--ware-magenta.svg)](#vibe-ware-notice)
 
-> **Vibe-Ware Notice**: This project is **vibe-ware** — rapidly designed and iterated with AI-assisted engineering, refactored into a clean production Rust architecture, and verified for full behavioral and assembly parity against the original RVS reference simulator.
+An interactive, fast terminal-based RISC-V simulator and debugger (RV64IMFD) written in pure Rust.
 
-**RVS++** is an ultra-fast, terminal-based visual simulator and headless batch runner for the RISC-V **RV64IMFD** instruction set architecture. It features a responsive multi-pane terminal interface (powered by Ratatui and Crossterm) with Vim modal editing, reversible execution, live hardware counters & CPI profiling, calling convention linting, call stack inspection, and a two-way GNU assembly transpiler.
-
----
-
-## Why RVS++?
-
-In the storied tradition of C $\to$ C++, **RVS++** takes the classic, foundational 2019 educational RISC-V simulator (`RVS046.tcl` by SIDIC) and increments it with modern systems programming and developer tooling:
-
-- **`++ Performance`**: Pure, zero-copy, highly optimized Rust engine (RV64IMFD) with instantaneous $\le 1$ ms startup and clean process teardown.
-- **`++ Developer Experience`**: Full Vim modal editing engine (`Normal`, `Insert`, `Command`, `Input`), seamless `$EDITOR` (`nvim`) buffer hand-off, and buffer undo/redo trees.
-- **`++ Debugging Rigor`**: Source & Listing breakpoints (`● `), 128-state history ring buffer for reversible execution (`Prev`), and live execution animation speed throttling (`1Hz`–`Max`).
-- **`++ Architectural Profiling`**: Dynamic cycle-accurate models, live CPI metrics, branch prediction statistics, and memory access traffic breakdown (`:stats`).
-- **`++ University Coursework Compliance`**: Automated calling convention compliance linter enforcing 16-byte stack pointer alignment and callee-saved register preservation across function calls (`:cc`).
-- **`++ Call Stack Inspection`**: Interactive visual stack frame inspector mapping frame memory slots to return addresses, saved registers, and local arguments (`:stack`).
-- **`++ Dialect Versatility`**: Standard GNU assembly mode supporting directives and 25+ pseudo-instructions with a built-in two-way in-editor transpiler (`:transpile [gnu|rvs]`).
-- **`++ Zero Friction Portability`**: Zero external C/X11/Tcl dependencies. Compiles and runs out-of-the-box on Linux, macOS, and Windows WSL via Cargo or Nix Flakes.
----
-
-## Prerequisites & Dependencies
-
-### Machines without Nix (Linux, macOS, BSD, Windows WSL)
-- **Rust Toolchain**: `cargo` and `rustc` (1.75 or later). Install via [rustup.rs](https://rustup.rs/):
-  ```bash
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-  ```
-- **Zero C / GUI / X11 dependencies required**: RVS is 100% pure Rust and runs natively in any standard terminal emulator (`xterm-256color`, Alacritty, Kitty, WezTerm, GNOME Terminal, tmux, etc.).
-- *(Optional)*:
-  - Your favorite `$EDITOR` (`nvim`, `vim`, `nano`) if using the external editor buffer hand-off feature.
-  - `tk` / `wish` only if you wish to run the legacy 2019 Tcl/Tk GUI script (`./run-source.sh`).
-
-### Nix / NixOS
-Nix Flakes and classic `nix-shell` are supported out-of-the-box. No system-wide `nix-ld` or manual library configuration is required.
+RVS++ takes the classic 2019 educational simulator (`RVS046.tcl`) used in university computer architecture courses and rebuilds it for modern development: real Vim modal editing, reversible execution, live calling convention checking, call stack inspection, and zero external dependencies.
 
 ---
 
-## Running in Local Repo (Without Installing)
+## Why We Built RVS++
 
-You can run RVS immediately from this repository without installing anything globally:
+If you've taken a Computer Organization course, you've probably had to use **RVS v0.46**—an educational simulator written in 2019 in Tcl/Tk.
 
-### Option A: Using the Runner Script (Easiest)
+The goal was simple: practice writing RISC-V assembly and get comfortable with computer architecture concepts. But actually using RVS day-to-day was frustrating:
+
+- **Can't use standard code**: When practicing problems or looking up examples online, everything uses standard RISC-V pseudo-instructions (`li`, `mv`, `ret`, `call`) and GNU directives (`.word`, `.dword`). Lectures teach you these concepts, but RVS outright rejects them with syntax errors. You're forced into a rigid, non-standard dialect (`DD`, `DW`, `DC`, raw `addi x0, ...`).
+- **Clunky UI & horizontal scrollbars**: The Listing and Memory views weren't real aligned tables—just manually spaced text. You were constantly wrestling with awkward horizontal scrollbars just to see what an instruction was doing.
+- **Painful to run locally**: Getting RVS to run on a personal laptop is like pulling teeth. It was only designed for university lab machines, and its legacy Tcl/Tk dependencies conflict with almost every modern operating system (macOS, modern Linux distributions).
+- **Missing basic editor features**: The built-in editor didn't even support standard editing shortcuts like `Ctrl+Backspace`.
+- **Zero debugging safety nets**: Stepping past a bug meant restarting the entire program from scratch. Forgetting 16-byte stack pointer alignment or clobbering saved registers (`s0`–`s11`) would silently cost you marks on autograders with zero diagnostic feedback.
+
+After using Nix to finally wrestle RVS onto a personal machine, a thought struck:
+> *Look at all the incredible modern CLI and TUI tools developers build in Rust today. Why can't we have a simulator like that for computer architecture—one that runs anywhere without fighting your OS, has real ergonomics, and actually helps you learn?*
+
+Like C++ to C, **RVS++** takes that familiar simulator and gives it a ground-up modernization:
+
+- **Runs everywhere instantly**: Single self-contained binary in pure Rust. No Tcl, no Tk, no X11 required. Runs natively on Linux, macOS, and Windows (WSL).
+- **Feels like a real editor**: Vim modal editing (`Normal`, `Insert`, `Command`), full motion keys (`h/j/k/l`, `w/b`, `0/$`, `gg/G`), `dd`/`yy`/`p`, multi-level undo/redo, `Ctrl+Backspace` / `Ctrl+W`, and an `$EDITOR` shortcut (`Enter`) to hand off to Neovim.
+- **Proper aligned tables**: Clean tabular views with vertical dividers and correlated bitfield-to-operand color coding (`[CLR]`)—no more fighting horizontal scrollbars.
+- **Actual debugging tools**: Interactive breakpoints with line markers (`● `), reverse stepping (`p` to rewind time from a 128-state ring buffer), and adjustable run speeds (`1Hz` up to `Max`) with live multi-pane animation.
+- **Catches assignment bugs early**: An automated calling convention linter (`:cc`) that alerts you if `$sp` isn't 16-byte aligned or if a function modifies callee-saved registers (`s0`–`s11`) without restoring them.
+- **Call stack visualizer**: Press `[STACK]` or run `:stack` to see your active call frames, stack memory slots, return addresses, and saved registers.
+- **GNU mode & two-way transpiler**: Write standard GNU assembly with directives and pseudo-instructions, or convert between GNU and canonical RVS dialect with one click (`[TRANSPILE]`) before submitting assignments.
+- **100% autograder compatible**: Headless batch mode (`--batch`) outputs byte-for-byte identical reports to the original `kkbatch` harness, guaranteeing your lab submissions pass grading.
+---
+
+## Quick Start
+
+### 1. Requirements
+All you need is a standard Rust toolchain (Rust 1.75+):
 ```bash
-# Launch interactive TUI
-./run.sh
-
-# Launch TUI with an assembly source file preloaded
-./run.sh tests/differential/t1.asm
-
-# Run headless batch execution
-./run.sh --batch <asm_file> <input_file> <output_file> [timeout_ms]
+# If you don't have Rust installed:
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
-The `run.sh` script automatically detects whether a built release binary, `cargo`, or `nix` is present and runs the appropriate target.
 
-### Option B: Using Cargo Directly
+### 2. Run Directly
 ```bash
-# Interactive TUI
+# Launch the interactive simulator:
 cargo run --release
 
-# Load a specific assembly file
+# Or preload an assembly file:
 cargo run --release -- tests/differential/t1.asm
-
-# Headless batch mode
-cargo run --release -- --batch program.s input.txt output.txt 3000
 ```
 
-### Option C: Standalone Release Binary
+You can also use the bundled `./run.sh` script, which automatically picks the fastest available target:
+```bash
+./run.sh [optional_file.s]
+```
+
+### 3. Build a Standalone Binary
 ```bash
 cargo build --release
-./target/release/rvs [optional_file.asm]
+./target/release/rvs [file.s]
 ```
 
----
-
-## Installing to System
-
-To install the `rvs` binary globally onto your PATH:
-
+### 4. Install Globally
 ```bash
 cargo install --path crates/rvs-tui
+# Now you can run `rvs` or `rvspp` from anywhere:
+rvs solution.s
 ```
-This places `rvs` into `~/.cargo/bin/rvs`. Make sure `~/.cargo/bin` is in your `PATH`.
-
-To uninstall:
-```bash
-cargo uninstall rvs-tui
-```
----
-
-## CLI & Headless Batch Execution
-
-In addition to the interactive TUI, `rvs` functions as a headless CLI execution tool. This is ideal for CI/CD pipelines, automated testing, scripting, and course autograding.
-
-Batch mode automatically activates whenever `--batch` (or `-b`) is passed, or when 3 or more positional arguments are supplied.
-
-### Usage
-
-```bash
-rvs [--batch] <asm_file> <input_file> <output_file> [timeout_ms]
-```
-
-Or via the local runner script:
-```bash
-./run.sh --batch <asm_file> <input_file> <output_file> [timeout_ms]
-```
-
-### Arguments & Options
-
-| Parameter | Description |
-| :--- | :--- |
-| `<asm_file>` | Path to the RISC-V assembly source file to assemble and run (e.g. `solution.s`). |
-| `<input_file>` | Text file containing stdin input lines to be consumed by interactive `ECALL 5..9` (integer, float, string, char) or DMA input requests. Pass an empty file (e.g. `/dev/null`) if no input is expected. |
-| `<output_file>` | Destination file where the comprehensive simulator execution report is written. |
-| `[timeout_ms]` | *(Optional)* Maximum execution time in milliseconds before halting (default: `3000` ms). Protects against infinite loops. |
-| `-b, --batch` | Explicitly flag batch mode. |
-| `-t, --timeout <ms>` | Execution timeout in milliseconds (default: `3000`). |
-| `-h, --help` | Print CLI help information and exit. |
-| `-V, --version` | Print version information and exit. |
-
-### Example: Autograding & Automated Testing
-
-```bash
-# Run headless simulation with a 5000ms timeout
-rvs --batch tests/differential/t1.asm tests/differential/t1.in.txt report.txt 5000
-
-# Inspect exit status in shell scripts
-if [ $? -eq 0 ]; then
-    echo "Simulation completed successfully. Report generated at report.txt"
-fi
-```
-
-### Report Output Structure
-The generated `<output_file>` contains the standard complete evaluation record:
-1. **`Load <asm_file>`**: Verbatim source code loaded.
-2. **`Compile`**: Assembly listing with machine encodings, addresses, and symbol table.
-3. **Initial `MEMORY`**: Initial state of all `DD` data cells before execution.
-4. **`Run`**: Instruction-by-instruction execution log from `START` to `ebreak` or halt.
-5. **Final `MEMORY`**: State of memory after execution.
-6. **Final `REGISTERS`**: Full integer (`x0`–`x31`) and float (`f0`–`f31`) register file contents.
-7. **`OUTPUT`**: Accumulated output text emitted by `ecall` (syscalls 0–4) and DMA output.
 
 ---
 
 ## Running on Nix / NixOS
 
-### 1. Direct Runner with Nix Flakes
+If you use Nix or NixOS, flakes and `nix-shell` are supported out of the box:
+
 ```bash
-# Run the Rust TUI directly
+# Run directly via Nix Flakes:
 nix run .
 
-# Run with an assembly file
+# Run with an assembly file:
 nix run . -- tests/differential/t1.asm
 
-# Build binary package into ./result/bin/rvs
-nix build .
-./result/bin/rvs
-
-# (Optional) Run the legacy 2019 Tcl/Tk version via Nix
-nix run .#legacy
-```
-
-### 2. Development Shell
-```bash
-# Using Flakes
+# Enter a dev shell with all tools available:
 nix develop
-
-# Or classic nix-shell
-nix-shell
-```
-Once inside the development shell, all tools (`cargo`, `rustc`, `rustfmt`, `clippy`, `tcl`, `wish`) are in your environment:
-```bash
-cargo run --release
 ```
 
 ---
 
 ## Controls & Keybindings
 
-### Global Controls
+### Global Navigation
 | Key | Action |
 | :--- | :--- |
-| `Tab` | Cycle focused pane forward (`Source` $\to$ `Listing` $\to$ `Regs` $\to$ `Mem` $\to$ `Exec` $\to$ `OUT` $\to$ `INP`) |
-| `Shift+Tab` / `BackTab` | Cycle focused pane backward |
-| `Enter` | **Source pane**: Opens source in your `$EDITOR` (`nvim`), auto-reloading buffer on exit.<br>**Other panes**: Toggles fullscreen zoom on the focused pane.<br>**INP pane**: Submits input. |
-| `z` / `Z` | Toggles fullscreen zoom on the currently focused pane |
-| `:` | Enter Command Mode (e.g. `:w`, `:q`, `:c`, `:s`, `:n`, `:r`, `:zoom`, `:color`, `:help`) |
-| `?` | Open Help / About modal |
-| `q` / `Ctrl+Q` / `Ctrl+C` | Quit simulator (prompts to save only if real changes exist) |
+| `Tab` / `Shift+Tab` | Cycle focus between panes forward / backward |
+| `Enter` | **Source pane**: Opens buffer in your `$EDITOR` (`nvim`), reloading on exit.<br>**Other panes**: Toggles fullscreen zoom.<br>**INP pane**: Submits input. |
+| `z` | Toggle fullscreen zoom on the active pane |
+| `:` | Enter Command mode (e.g. `:w`, `:q`, `:c`, `:s`, `:n`, `:r`, `:stats`, `:stack`) |
+| `?` | Open the Help / Shortcut reference modal |
+| `q` / `Ctrl+C` | Clean exit (prompts to save only if you have unsaved changes) |
 
-### Simulation Commands (Normal Mode)
+### Simulation & Debugging (Normal Mode)
 | Key | Action |
 | :--- | :--- |
-| `c` | **Compile** assembly source |
-| `s` | **START**: Reset PC to `START` address and begin execution |
-| `n` | **Next / Step**: Execute one instruction (or `:n <count>` in Command mode) |
-| `p` / `P` / `N` | **Step Back / Prev**: Rewind simulator by 1 instruction from the 128-state history ring buffer |
+| `c` | **Compile**: Assemble the current source buffer |
+| `s` | **START**: Reset PC to `START` address and begin running |
+| `n` | **Step**: Execute one instruction forward (or `:n <count>`) |
+| `p` / `P` / `N` | **Step Back / Prev**: Rewind simulator by 1 instruction (128-state history) |
 | `r` | **Run**: Execute continuously until `ebreak`, error, stop, or breakpoint |
-| `x` | **Stop**: Halt continuous execution (when not in Source pane) |
-| `B` | **Breakpoint**: Toggle breakpoint on the current line in Source (or current PC in Listing) |
-| `b` | Toggle breakpoint on current PC (when in Listing pane) |
-| `+` / `]` | **Speed Up**: Increase execution animation speed (`1Hz` $\to$ `5Hz` $\to$ `20Hz` $\to$ `Max`) |
-| `-` / `[` | **Slow Down**: Decrease execution animation speed |
+| `x` | **Stop**: Halt continuous execution |
+| `B` | **Breakpoint (Source)**: Toggle breakpoint on current cursor line (red `● `) |
+| `b` | **Breakpoint (Listing)**: Toggle breakpoint on current PC |
+| `+` / `]` | **Speed Up**: Increase animation speed (`1Hz` $\to$ `5Hz` $\to$ `20Hz` $\to$ `Max`) |
+| `-` / `[` | **Slow Down**: Decrease animation speed |
+
 ### Vim Editing in Source Pane
 | Key | Action |
 | :--- | :--- |
-| `h` / `j` / `k` / `l` | Cursor left, down, up, right |
+| `h` / `j` / `k` / `l` | Move cursor left, down, up, right |
 | `w` / `b` | Jump word forward / backward |
-| `0` / `$` | Jump to beginning / end of line |
-| `gg` / `G` | Jump to beginning / end of file |
-| `i` / `a` | Enter `INSERT` mode at cursor / after cursor |
-| `I` / `A` | Enter `INSERT` mode at line start / line end |
-| `o` / `O` | Insert line below / above and enter `INSERT` mode |
+| `0` / `$` | Jump to start / end of line |
+| `gg` / `G` | Jump to top / bottom of buffer |
+| `i` / `a` | Enter Insert mode at cursor / after cursor (`Esc` returns to Normal) |
+| `I` / `A` | Enter Insert mode at line start / line end |
+| `o` / `O` | Insert new line below / above and enter Insert mode |
 | `x` | Delete character under cursor |
-| `dd` | Delete current line and copy to yank buffer |
-| `yy` / `Y` | Yank (copy) current line |
+| `dd` | Delete line and copy to yank buffer |
+| `yy` / `Y` | Yank (copy) line |
 | `p` / `P` | Paste below / above current line |
-| `u` / `Ctrl+R` | Undo / Redo |
-| `Ctrl+D` / `Ctrl+U` | Half-page scroll down / up |
-| `Esc` | Return to `NORMAL` mode |
+| `u` / `Ctrl+R` | Undo / Redo buffer edits |
+| `Ctrl+D` / `Ctrl+U` | Scroll half-page down / up |
 
-### Pane Toolbar & Shortcut Toggles
-- **`Source` Pane**:
-  - `[RVS]`: Set assembly dialect to canonical RVS mode
-  - `[GNU]`: Set assembly dialect to standard GNU mode (supports directives and pseudo-instructions)
-  - `[TRANSPILE]`: In-editor two-way transpiler (translates buffer between GNU and RVS syntax and toggles mode)
-- **`Listing` Pane**:
-  - `1`: Toggle TXT source column
-  - `2`: Toggle Correlated `[CLR]` colorizer (maps bitfields to operands)
-  - `0` / `i`: InitPC (reset PC to START without running)
-  - Click `[SPD:...]`: Cycle execution speed (`1Hz`, `5Hz`, `20Hz`, `Max`)
-  - `[BP]`: Active breakpoint indicator (click or press `b` to toggle at PC)
-- **`Regs` Pane**:
-  - `1`: Toggle HEX values ` │ ` `2`: Toggle INT registers ` │ ` `3`: Toggle FLP registers
-- **`Mem` Pane**:
-  - `1`: Toggle HEX ` │ ` `2`: Toggle INT ` │ ` `3`: Toggle FLP ` │ ` `4`: Toggle TXT
-  - `[SP]`: Jump memory scroll directly to current stack pointer (`$sp` / `x2`)
-  - `[0x0]`: Jump memory scroll back to base address `0x0`
-  - `[STACK]`: Open Call Stack & Stack Frame Visualizer modal
-- **`Exec` Pane**:
-  - `[Clear]`: Clear execution trace log
-  - `[STATS]`: Open Execution Metrics & Hardware Counters modal
-  - `[CC:ON/OFF]`: Toggle Calling Convention compliance checker
-  - `[STACK]`: Open Call Stack & Stack Frame Visualizer modal
-- **`OUT` / `INP` Panes**:
-  - `d` (or `1`): Toggle DMA active state
-### File Explorer Modal (`Ctrl+O` or `:e`)
-- **Normal Mode (Yazi-style)**:
-  - `j` / `k` / `Down` / `Up`: Navigate file list
-  - `h` / `Left`: Navigate to parent directory (`..`)
-  - `l` / `Right` / `Enter`: Open file or descend into directory
-  - `g` / `G`: Jump to first / last item
-  - `J` / `K`: Scroll file preview pane
-  - `/` or `i`: Switch to Filter/Path typing mode
-  - `q` / `Esc`: Close explorer
-- **Filter Mode**:
-  - Type path or prefix filter directly; `Tab` to autocomplete; `Enter` to open; `Esc` returns to Normal mode.
+### Bottom Toolbar Buttons
+Each pane has an interactive bottom toolbar you can click:
 
-### Memory-Mapped I/O (DMA)
-RVS supports memory-mapped I/O at fixed low-memory addresses:
-- **Output (`OUT`)**: Define labels `OUTC` (`0x0`, control word) and `OUTD` (`0x8`, data word). When present, DMA OUT auto-enables on compile.
-- **Input (`INP`)**: Define labels `INPC` (`0x10`, control word) and `INPD` (`0x18`, data word). When present, DMA INP auto-enables on compile.
-
-
-### Advanced Debugging, Metrics & Profiling Capabilities
-
-#### 1. Interactive Breakpoints (Source & Listing)
-- Set breakpoints by:
-  - Pressing `B` in Normal mode on the current line in `Source`.
-  - Running `:b` (uses current line in `Source`, or current PC in `Listing`).
-  - Running `:b <line>` (e.g. `:b 15`), `:b pc`, `:b <label>`, or `:b <addr>`.
-  - Running `:cb` or `:clearbreaks` to clear all breakpoints.
-- Visuals: Lines with active breakpoints display a prominent red `● ` indicator and bold red line numbers in both the `Source` editor and `Listing` table.
-- Running (`r`) pauses immediately before executing any breakpoint address.
-
-#### 2. "Step Back" / Reverse Step (`Prev`)
-- `App` continuously maintains a 128-state ring buffer of full simulator snapshots (`regs`, `mem`, `exec_log`, `output`, `pc`).
-- Press `p`, `P`, `N` (Shift+N), or run `:prev` / `:back` to step backward by 1 instruction, restoring exact register and memory states.
-
-#### 3. Visual Execution Animation & Speed Control
-- Control simulation speed using `+` / `-` (or `[` / `]`), clicking `[SPD:...]` in the `Listing` toolbar, or running `:speed <1|5|20|max>`.
-- In `1Hz`, `5Hz`, or `20Hz` modes, pressing `r` (Run) steps instruction-by-instruction with live visual updates to all 6 panes, animating algorithm execution in real time.
-
-#### 4. Hardware Counters & Dynamic Profiling (`:stats`)
-- Run `:stats`, `:metrics`, or click `[STATS]` in the `Exec` toolbar to inspect:
-  - **Total Instructions & Estimated Cycles**: Cycle accurate model accounting for 1-cycle ALU ops, branch penalties (+1 for taken branches), load-to-use latency (+1), multi-cycle multiply/divide (+2), and `ecall` syscall overhead (+4).
-  - **Average CPI**: Live dynamic CPI (`cycles / instructions`).
-  - **Branch Prediction Stats**: Total branches, branches taken, and taken percentage rate (`%`).
-  - **Memory Accesses**: Total loads and stores.
-  - **Instruction Mix Breakdown**: Categorized counts for ALU, Memory, Jumps, Floating-Point, and Syscalls.
-
-#### 5. Calling Convention Compliance Checker (`:cc`)
-- An automated linter designed for university computer architecture courses:
-  - **16-Byte Stack Alignment**: On every function call (`jal ra`, `jalr ra`), verifies that `$sp` satisfies `sp % 16 == 0`.
-  - **Saved Register Preservation**: Shadow-tracks all 12 integer saved registers (`s0`–`s11` / `x8`, `x9`, `x18`–`x27`) and float saved registers upon function entry. On function return (`jalr zero, ra, 0`), verifies that all saved registers and `$sp` were properly restored.
-  - Logs bold `WARN [Convention]` messages in `Exec` and lists violations in `:stats`.
-  - Toggle via `:cc on`, `:cc off`, `:cc`, or clicking `[CC:ON]` / `[CC:OFF]`.
-
-#### 6. Memory Navigation & Stack Pointer Jump
-- Click `[SP]` in the `Mem` toolbar or run `:mem sp` / `:mem stack` to jump memory view directly to `$sp` (`x2`) to inspect active stack frames.
-- Click `[0x0]` or run `:mem 0` to jump back to address `0x0`.
-- Jump to any arbitrary address or symbol with `:mem <addr>` or `:mem <symbol>` (e.g. `:mem 0x2000`, `:mem OUTC`).
-
-#### 7. Call Stack & Stack Frame Visualizer (`:stack`, `[STACK]`)
-- Inspect the active call stack and stack memory hierarchy:
-  - Open via `:stack`, `:callstack`, `:frames`, or clicking `[STACK]` in `Exec` or `Mem`.
-  - Displays all active call frames in hierarchical order with depth, target function address, caller site address, and function label names.
-  - Calculates frame size and inspects double-word memory slots inside each active frame, annotating return addresses (`Saved ra`), preserved callee-saved registers (`Saved s0`..`s11`), and local arguments.
-  - Verifies 16-byte stack pointer alignment with status badge (`16-byte ALIGNED ✓` or `MISALIGNED ✗`).
-
-#### 8. Standard GNU Mode & Two-Way In-Editor Transpiler (`:mode`, `:transpile`)
-- **Dialect Switching (`:mode [gnu|rvs]`)**:
-  - Standard RVS Dialect (default): Strict educational 3-operand instructions and directives (`DD`, `DW`, `DH`, `DB`, `DC`, `DF`, `DM`).
-  - Standard GNU Mode: Directly assemble code written with GNU directives (`.word`, `.dword`, `.half`, `.byte`, `.float`, `.asciz`, `.string`, `.ascii`, `.zero`, `.space`, `.org`) and pseudo-instructions (`li`, `la`, `mv`, `ret`, `call`, `tail`, `j`, `jr`, `nop`, `not`, `neg`, `negw`, `sext.w`, `seqz`, `snez`, `sltz`, `sgtz`, `beqz`, `bnez`, `blez`, `bgez`, `bltz`, `bgtz`, `bgt`, `ble`, `bgtu`, `bleu`, `fmv.s`, `fabs.s`, `fneg.s`, etc.) while gracefully stripping non-code metadata (`.text`, `.data`, `.globl`, `.section`, `.align`).
-- **Two-Way Transpiler (`:transpile [gnu|rvs]`)**:
-  - `:transpile rvs`: Lowers GNU pseudo-instructions and directives into canonical RVS dialect directly inside the editor buffer.
-  - `:transpile gnu`: Compresses canonical 3-operand instructions back into idiomatic GNU RISC-V pseudo-instructions.
+- **`Source`**:
+  - `[RVS]`: Switch dialect to canonical RVS mode.
+  - `[GNU]`: Switch dialect to standard GNU mode (directives & pseudo-instructions).
+  - `[TRANSPILE]`: In-editor two-way transpiler (translates buffer between GNU and RVS syntax in-place and flips mode).
+- **`Listing`**:
+  - `[TXT]` (key `1`): Toggle raw source text column.
+  - `[CLR]` (key `2`): Toggle correlated bitfield-to-operand colorizer.
+  - `[SPD:...]`: Cycle run speed (`1Hz`, `5Hz`, `20Hz`, `Max`).
+  - `[BP]`: Active breakpoint indicator.
+  - `InitPC` (key `0` / `i`): Reset PC to `START` without running.
+- **`Regs`**:
+  - `[HEX]` (key `1`), `[INT]` (key `2`), `[FLP]` (key `3`): Toggle representation formats.
+- **`Mem`**:
+  - `[HEX]`, `[INT]`, `[FLP]`, `[TXT]`: Toggle memory data representations.
+  - `[SP]`: Jump memory view straight to current `$sp` (`x2`).
+  - `[0x0]`: Jump memory view back to address `0x0`.
+  - `[STACK]`: Open Call Stack & Stack Frame Visualizer.
+- **`Exec`**:
+  - `[Clear]`: Clear execution trace log.
+  - `[STATS]`: Open Hardware Counters & Metrics modal.
+  - `[CC:ON/OFF]`: Toggle Calling Convention compliance checker.
+  - `[STACK]`: Open Call Stack Visualizer.
+- **`OUT` / `INP`**:
+  - `[DMA:ON/OFF]` (key `d`): Toggle DMA active polling.
 
 ---
 
-### Colon Command Reference (`:`)
+## Highlights & Features
+
+### 1. Interactive Breakpoints (`● `)
+Set breakpoints by line number, PC, symbol, or hex address:
+- Press `B` in Normal mode on any line in `Source`.
+- Or run `:b` (current line), `:b 15`, `:b pc`, `:b main`, or `:b 0x20`.
+- Clear all breakpoints with `:cb` or `:clearbreaks`.
+- Active breakpoints appear with a bold red `● ` marker in both the `Source` editor and `Listing` table. Continuous execution (`r`) pauses right before executing the breakpoint.
+
+### 2. "Step Back" Reverse Execution (`Prev`)
+Made a wrong turn or stepped past the bug? Press `p`, `P`, or `N` to step backward. RVS++ continuously records a 128-state ring buffer snapshotting registers, memory, and logs, letting you cleanly rewind execution.
+
+### 3. Calling Convention Linter (`:cc`)
+Designed specifically to prevent common student pitfalls in computer architecture labs:
+- **16-byte alignment**: Verifies `$sp % 16 == 0` on every function call (`jal ra`, `jalr ra`).
+- **Callee-saved registers**: Takes a shadow snapshot of registers `s0`–`s11` and `fs0`–`fs11` upon function entry. When the function returns (`jalr zero, ra, 0`), verifies that all saved registers and `$sp` were properly restored.
+- Violations are immediately flagged in bright yellow in the `Exec` log (`WARN [Convention]: ...`) and cataloged in the `:stats` modal.
+
+### 4. Call Stack & Stack Frame Visualizer (`:stack`)
+Press `[STACK]` or run `:stack` to inspect your active call stack:
+- Hierarchical display showing active frames, function names, and caller addresses.
+- Inspects double-word memory slots inside each active frame, automatically detecting return addresses (`Saved ra`), preserved callee-saved registers (`Saved s0`..`s11`), and spilled arguments.
+- Live stack pointer alignment indicator (`16-byte ALIGNED ✓` or `MISALIGNED ✗`).
+
+### 5. Hardware Counters & Profiling (`:stats`)
+Press `[STATS]` or run `:stats` to inspect dynamic execution metrics:
+- **Cycle Model & Average CPI**: Tracks 1-cycle ALU ops, branch penalties (+1 for taken branches), load-to-use memory latency (+1), multi-cycle multiply/divide (+2), and `ecall` overhead (+4).
+- **Branch Prediction Stats**: Total branches, branches taken, and taken rate (`%`).
+- **Memory Traffic**: Total loads and stores retired.
+- **Instruction Mix**: Breakdown of ALU, memory, jumps, float, and syscall instructions.
+
+### 6. Standard GNU Mode & Two-Way Transpiler (`:mode`, `:transpile`)
+Switch between strict educational syntax and standard GNU RISC-V assembly:
+- **GNU Mode (`:mode gnu`)**: Assemble files using standard GNU directives (`.word`, `.dword`, `.half`, `.byte`, `.float`, `.asciz`, `.string`, `.zero`, etc.) and 25+ pseudo-instructions (`li`, `la`, `mv`, `ret`, `call`, `j`, `jr`, `nop`, `not`, `neg`, `beqz`, `bnez`, `bgt`, `ble`, etc.). Linker directives like `.text`, `.data`, `.globl` are gracefully ignored.
+- **Two-Way Transpiler (`:transpile [gnu|rvs]`)**: Convert your buffer in-place!
+  - `:transpile rvs` expands all pseudo-ops into canonical 3-operand RVS instructions.
+  - `:transpile gnu` compresses canonical code back into clean GNU pseudo-instructions.
+
+---
+
+## Colon Command Reference (`:`)
 
 Press `:` in Normal mode to enter Command mode:
 
 | Command | Description |
 | :--- | :--- |
 | `:w [path]` | Save current file (or Save As if untitled) |
-| `:q` | Quit simulator (prompts to save if real modifications exist) |
+| `:q` | Quit (prompts if there are unsaved changes) |
 | `:q!` | Force quit immediately without saving |
 | `:wq` / `:x` | Save and quit |
-| `:e [path]` | Open file in File Explorer (or load path directly) |
-| `:c` / `:compile` | Compile assembly source |
-| `:s` / `:start` | Reset PC to `START` address and run |
-| `:n [count]` | Step `1` or `count` instructions |
+| `:e [path]` | Open file in Yazi-style file explorer (or load path directly) |
+| `:c` / `:compile` | Assemble source code |
+| `:s` / `:start` | Reset PC to `START` and run |
+| `:n [count]` | Step `1` or `count` instructions forward |
 | `:p` / `:prev` | Step back / rewind 1 instruction |
 | `:r` / `:run` | Run continuously |
-| `:stop` / `:halt` | Halt continuous execution |
+| `:stop` / `:halt` | Stop execution |
 | `:reset` / `:initpc` | Reset PC to `START` without running |
-| `:b [line\|addr\|label\|pc]` | Toggle breakpoint (uses cursor line in Source, or specified target) |
-| `:cb` / `:clearbreaks` | Clear all active breakpoints |
+| `:b [line\|addr\|pc]` | Toggle breakpoint (uses cursor line in Source, or specified target) |
+| `:cb` / `:clearbreaks` | Clear all breakpoints |
 | `:speed <1\|5\|20\|max>` | Set execution speed preset |
 | `:mem <sp\|addr\|label>` | Jump memory view to stack pointer or address |
-| `:color [on\|off]` | Toggle or set Listing correlated bitfield colorizing |
-| `:cc [on\|off]` | Toggle Calling Convention compliance checker |
+| `:color [on\|off]` | Toggle bitfield-to-operand colorizer |
+| `:cc [on\|off]` | Toggle calling convention compliance checker |
 | `:mode [gnu\|rvs]` | Toggle or set assembly dialect mode |
-| `:transpile [gnu\|rvs]` | Transpile current editor buffer between GNU and RVS syntax |
+| `:transpile [gnu\|rvs]` | Transpile buffer in-place between GNU and RVS syntax |
 | `:stats` / `:metrics` | Open Execution Metrics & Hardware Counters dialog |
 | `:stack` / `:callstack` | Open Call Stack & Stack Frame Visualizer dialog |
 | `:zoom` / `:z` | Toggle fullscreen zoom on focused pane |
 | `:clear` | Clear `Exec` trace log and `OUT` output |
 | `:edit` / `:nvim` | Open current buffer in external `$EDITOR` |
-| `:help` / `:h` | Open Help / About modal |
+| `:help` / `:h` | Open Help modal |
+
+---
+
+## CLI & Headless Batch Execution
+
+In addition to the interactive TUI, `rvs` works as a headless CLI runner for grading scripts, autograders, and CI pipelines:
+
+```bash
+rvs --batch <asm_file> <input_file> <output_file> [timeout_ms]
+```
+
+### Arguments
+- `<asm_file>`: Path to the assembly source file.
+- `<input_file>`: File containing standard input lines for interactive `ECALL 5..9` or DMA requests (use `/dev/null` if none).
+- `<output_file>`: Where the evaluation report is written.
+- `[timeout_ms]`: Execution timeout in milliseconds (default: `3000` ms). Prevents runaway loops.
+
+The output report structure matches the original `RVS046.tcl` batch output verbatim:
+1. `Load <asm_file>`: Verbatim source code.
+2. `Compile`: Assembled listing with encodings and symbols.
+3. Initial `MEMORY`: Starting state of data cells.
+4. `Run`: Trace log from `START` to `ebreak` or halt.
+5. Final `MEMORY`: Memory contents after execution.
+6. Final `REGISTERS`: Integer (`x0`–`x31`) and float (`f0`–`f31`) registers.
+7. `OUTPUT`: Accumulated text output from `ecall` and DMA.
+
+---
 
 ## Testing
 
-Run the full workspace test suite (50 unit and integration tests):
+Run the full workspace test suite (41 unit and integration tests):
 ```bash
 cargo test --workspace
 ```
 
 ---
 
-## Project Structure
+## License & Accreditations
 
-```
-rvs/
-├── Cargo.toml               # Workspace configuration
-├── Cargo.lock
-├── crates/
-│   ├── rvs-core/            # Pure, headless RV64IMFD simulator engine
-│   │   ├── src/
-│   │   │   ├── assembler.rs # Two-pass assembler, directives (DD, DW, DC, etc.)
-│   │   │   ├── executor.rs  # RV64IMFD instruction interpreter & DMA engine
-│   │   │   ├── format.rs    # Memory/register formatters & kkbatch runner
-│   │   │   ├── memory.rs    # Sparse segmented memory
-│   │   │   ├── registers.rs # Register files & ABI name maps
-│   │   │   └── tcl.rs       # Exact arithmetic and formatting primitives
-│   │   └── tests/
-│   └── rvs-tui/             # Interactive Ratatui TUI application
-│       ├── src/
-│       │   ├── app.rs       # Application state, event loop & key routing
-│       │   ├── editor.rs    # Multi-line Vim text buffer & undo stack
-│       │   ├── explorer.rs  # Yazi-style path suggestions & preview engine
-│       │   ├── syntax.rs    # Exact-width RISC-V syntax & bitfield highlighter
-│       │   ├── ui.rs        # 6-pane layout, tabular formatters & hit-testing
-│       │   ├── main.rs      # Binary entry point
-│       │   └── lib.rs
-│       └── tests/           # High-signal behavioral integration tests
-├── default.nix              # Standard Nix package derivation
-├── flake.nix                # Flake outputs (packages, apps, devShells)
-├── shell.nix                # Classic nix-shell environment
-├── legacy.nix               # Launcher for legacy Tcl/Tk source
-├── run.sh                   # Portable multi-platform runner script
-├── run-source.sh            # Script to run legacy Tcl/Tk source with wish
-└── src/
-    └── RVS046.tcl           # Reference 2019 Tcl/Tk implementation
-```
+This project is dual-licensed and honors the educational foundation that made it possible:
 
----
+- **RVS++ Rust Workspace (`crates/rvs-core`, `crates/rvs-tui`)**: Released under the **MIT License**. See [LICENSE](LICENSE).
+- **Original Reference (`src/RVS046.tcl`)**: Copyright (c) 2019 **SIDIC**. Distributed under SIDIC's educational not-for-profit license (reproduced in full in [LICENSE](LICENSE) and within lines 321–325 of `src/RVS046.tcl`).
 
-## License
-
-- **Rust Workspace (`crates/rvs-core`, `crates/rvs-tui`)**: Released under the **MIT License**. See [Cargo.toml](Cargo.toml).
-- **Reference Implementation (`src/RVS046.tcl`)**: Copyright (c) 2019 SIDIC. Distributed under SIDIC's educational not-for-profit license (see lines 321–325 of `src/RVS046.tcl`).
+We gratefully acknowledge SIDIC for the reference simulator and assembly specification that inspired this modernized rewrite.
