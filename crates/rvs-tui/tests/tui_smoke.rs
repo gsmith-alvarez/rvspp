@@ -784,3 +784,117 @@ fn test_tier2_execution_metrics_and_calling_convention() {
     app.execute_command();
     assert!(app.sim.convention.enabled);
 }
+
+#[test]
+fn test_gnu_assembly_dialect_and_transpiler() {
+    let mut app = App::new(None);
+
+    // 1. Verify GNU mode assembling standard GNU syntax & pseudo-instructions
+    app.command_input = ":mode gnu".to_string();
+    app.execute_command();
+    assert_eq!(app.sim.dialect, rvs_core::transpiler::AssemblyDialect::Gnu);
+
+    let gnu_source = r#"
+.globl main
+.text
+main:
+    li   a0, 42
+    mv   a1, a0
+    nop
+    call helper
+    ebreak x0, x0, 0
+
+helper:
+    addi a0, a0, 10
+    ret
+"#;
+    app.editor.set_text(gnu_source);
+    app.compile();
+    assert!(!app.sim.listing.contains("ERROR:"), "Listing had error: {}", app.sim.listing);
+
+    app.action_start();
+    while app.running {
+        app.run_chunk(std::time::Duration::from_millis(50));
+    }
+
+    // a0 should be 42 + 10 = 52, a1 should be 42
+    assert_eq!(app.sim.regs.read_x(10), 52); // a0 = x10
+    assert_eq!(app.sim.regs.read_x(11), 42); // a1 = x11
+
+    // 2. Test in-place buffer transpiler commands
+    app.command_input = ":transpile rvs".to_string();
+    app.execute_command();
+    let rvs_buf = app.editor.text();
+    assert!(rvs_buf.contains("addi a0, x0, 42"));
+    assert!(rvs_buf.contains("addi a1, a0, 0"));
+    assert!(rvs_buf.contains("jalr x0, ra, 0"));
+
+    app.command_input = ":transpile gnu".to_string();
+    app.execute_command();
+    let gnu_buf = app.editor.text();
+    assert!(gnu_buf.contains("li a0, 42"));
+    assert!(gnu_buf.contains("mv a1, a0"));
+    assert!(gnu_buf.contains("ret"));
+}
+
+#[test]
+fn test_call_stack_and_frame_visualizer() {
+    let backend = TestBackend::new(140, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    let mut app = App::new(None);
+    // A program with a call frame that allocates stack and saves return address
+    let src = r#"
+START:  addi sp, x0, 0x100      # 16-byte aligned sp = 256
+        jal  ra, outer
+        ebreak x0, x0, 0
+
+outer:  addi sp, sp, -16        # allocate frame
+        sd   ra, 8(sp)          # save return address
+        jal  ra, inner
+        ld   ra, 8(sp)          # restore return address
+        addi sp, sp, 16         # deallocate frame
+        jalr x0, ra, 0          # return
+
+inner:  ebreak x0, x0, 0        # pause execution inside inner function
+        jalr x0, ra, 0
+"#;
+    app.editor.set_text(src);
+    app.compile();
+
+    // Run until ebreak inside `inner`
+    app.action_start();
+    while app.running {
+        app.run_chunk(std::time::Duration::from_millis(50));
+    }
+
+    // 1. Verify CallFrame stack inspection
+    let frames = app.sim.get_stack_frames();
+    assert_eq!(frames.len(), 2, "Should have 2 active call frames (outer and inner)");
+
+    let outer_frame = &frames[0];
+    assert_eq!(outer_frame.function_name, "outer");
+    assert_eq!(outer_frame.slots.len(), 2, "16-byte frame has 2 double-word slots");
+    assert!(outer_frame.slots.iter().any(|s| s.annotation.contains("Saved ra")), "Must identify saved ra slot");
+
+    let inner_frame = &frames[1];
+    assert_eq!(inner_frame.function_name, "inner");
+
+    // 2. Open :stack modal and test UI rendering
+    app.command_input = ":stack".to_string();
+    app.execute_command();
+    assert_eq!(app.modal, Modal::CallStack);
+
+    terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+    let frame = terminal.backend().to_string();
+    assert!(frame.contains("Call Stack & Stack Frame Visualizer"));
+    assert!(frame.contains("Current $sp:"));
+    assert!(frame.contains("16-byte ALIGNED ✓"));
+    assert!(frame.contains("Frame 0: outer"));
+    assert!(frame.contains("Frame 1: inner"));
+    assert!(frame.contains("Saved ra"));
+
+    // Close modal with Esc
+    app.on_key(key(KeyCode::Esc));
+    assert_eq!(app.modal, Modal::None);
+}

@@ -1100,11 +1100,6 @@ pub fn step(sim: &mut Simulator) -> StepResult {
         "JALR" => args.first().map(|r| r != "x0" && r != "zero").unwrap_or(false),
         _ => false,
     };
-    if is_call && sim.convention.enabled {
-        if let Some(w) = sim.convention.on_call(inst_pc, &sim.regs) {
-            sim.exec_log.push_str(&format!("WARN [Convention]: {w}\n"));
-        }
-    }
 
     let is_ret = op_upper == "JALR"
         && args.first().map(|r| r == "x0" || r == "zero").unwrap_or(false)
@@ -1125,6 +1120,14 @@ pub fn step(sim: &mut Simulator) -> StepResult {
             StepResult::Halted
         }
     };
+    if is_call && sim.convention.enabled {
+        let target_pc = sim.regs.pc;
+        let caller_name = sim.find_symbol_name(inst_pc);
+        let function_name = sim.find_symbol_name(target_pc);
+        if let Some(w) = sim.convention.on_call(inst_pc, target_pc, caller_name, function_name, &sim.regs) {
+            sim.exec_log.push_str(&format!("WARN [Convention]: {w}\n"));
+        }
+    }
 
     if is_ret && sim.convention.enabled {
         for w in sim.convention.on_return(inst_pc, &sim.regs) {

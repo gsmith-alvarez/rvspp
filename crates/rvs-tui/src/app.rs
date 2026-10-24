@@ -110,6 +110,7 @@ pub enum Modal {
     ConfirmSave(ConfirmAction),
     About,
     Stats,
+    CallStack,
 }
 
 
@@ -1495,6 +1496,33 @@ impl App {
                     self.status = format!("ERROR: Invalid memory address or symbol \"{args}\"");
                 }
             }
+            "mode" | "dialect" => {
+                match args.to_lowercase().as_str() {
+                    "gnu" => self.sim.dialect = rvs_core::transpiler::AssemblyDialect::Gnu,
+                    "rvs" | "dialect" => self.sim.dialect = rvs_core::transpiler::AssemblyDialect::Rvs,
+                    "" => self.sim.dialect = self.sim.dialect.toggle(),
+                    _ => self.status = format!("ERROR: Expected mode 'gnu' or 'rvs', got \"{args}\""),
+                }
+                self.status = format!("Assembly dialect: {}", self.sim.dialect.name());
+                self.needs_full_clear = true;
+            }
+            "transpile" | "tp" => {
+                let target = args.to_lowercase();
+                let src = self.editor.text();
+                let is_gnu_target = target == "gnu" || (target.is_empty() && self.sim.dialect == rvs_core::transpiler::AssemblyDialect::Rvs);
+                let transpiled = if is_gnu_target {
+                    rvs_core::transpiler::transpile_rvs_to_gnu(&src)
+                } else {
+                    rvs_core::transpiler::transpile_gnu_to_rvs(&src)
+                };
+                self.editor.set_text(&transpiled);
+                self.status = format!("Transpiled buffer to {} format", if is_gnu_target { "GNU" } else { "RVS" });
+                self.needs_full_clear = true;
+            }
+            "stack" | "callstack" | "frames" => {
+                self.modal = Modal::CallStack;
+                self.needs_full_clear = true;
+            }
             other => {
                 self.status = format!("ERROR: Unknown command :{other}");
             }
@@ -1521,7 +1549,7 @@ impl App {
 
     fn on_key_modal(&mut self, key: KeyEvent) {
         match (&self.modal, key.code) {
-            (Modal::About | Modal::Stats, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) => {
+            (Modal::About | Modal::Stats | Modal::CallStack, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) => {
                 self.modal = Modal::None;
                 self.needs_full_clear = true;
             }
@@ -1747,6 +1775,10 @@ impl App {
             (Pane::Mem, 4) => self.sim.view.mem_txt = !self.sim.view.mem_txt,
             (Pane::Mem, 5) => self.jump_mem_to_sp(),
             (Pane::Mem, 6) => self.jump_mem_to_address(0),
+            (Pane::Mem, 7) => {
+                self.modal = Modal::CallStack;
+                self.needs_full_clear = true;
+            }
             (Pane::Out, 1 | 5) => {
                 if self.dma_out_available {
                     self.sim.view.dma_out = !self.sim.view.dma_out;
@@ -1771,6 +1803,15 @@ impl App {
                     "Calling convention checker: {}",
                     if self.sim.convention.enabled { "ON" } else { "OFF" }
                 );
+                self.needs_full_clear = true;
+            }
+            (Pane::Exec, 3) => {
+                self.modal = Modal::CallStack;
+                self.needs_full_clear = true;
+            }
+            (Pane::Source, 1) => {
+                self.sim.dialect = self.sim.dialect.toggle();
+                self.status = format!("Assembly dialect: {}", self.sim.dialect.name());
                 self.needs_full_clear = true;
             }
             _ => {}

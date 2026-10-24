@@ -207,6 +207,8 @@ cargo run --release
 | `Esc` | Return to `NORMAL` mode |
 
 ### Pane Toolbar & Shortcut Toggles
+- **`Source` Pane**:
+  - `Source [RVS]` / `Source [GNU]`: Assembly dialect indicator. Click or run `:mode` to toggle.
 - **`Listing` Pane**:
   - `1`: Toggle TXT source column
   - `2`: Toggle Correlated `[CLR]` colorizer (maps bitfields to operands)
@@ -219,10 +221,12 @@ cargo run --release
   - `1`: Toggle HEX ` │ ` `2`: Toggle INT ` │ ` `3`: Toggle FLP ` │ ` `4`: Toggle TXT
   - `[SP]`: Jump memory scroll directly to current stack pointer (`$sp` / `x2`)
   - `[0x0]`: Jump memory scroll back to base address `0x0`
+  - `[STACK]`: Open Call Stack & Stack Frame Visualizer modal
 - **`Exec` Pane**:
   - `[Clear]`: Clear execution trace log
   - `[STATS]`: Open Execution Metrics & Hardware Counters modal
   - `[CC:ON/OFF]`: Toggle Calling Convention compliance checker
+  - `[STACK]`: Open Call Stack & Stack Frame Visualizer modal
 - **`OUT` / `INP` Panes**:
   - `d` (or `1`): Toggle DMA active state
 ### File Explorer Modal (`Ctrl+O` or `:e`)
@@ -282,6 +286,21 @@ RVS supports memory-mapped I/O at fixed low-memory addresses:
 - Click `[0x0]` or run `:mem 0` to jump back to address `0x0`.
 - Jump to any arbitrary address or symbol with `:mem <addr>` or `:mem <symbol>` (e.g. `:mem 0x2000`, `:mem OUTC`).
 
+#### 7. Call Stack & Stack Frame Visualizer (`:stack`, `[STACK]`)
+- Inspect the active call stack and stack memory hierarchy:
+  - Open via `:stack`, `:callstack`, `:frames`, or clicking `[STACK]` in `Exec` or `Mem`.
+  - Displays all active call frames in hierarchical order with depth, target function address, caller site address, and function label names.
+  - Calculates frame size and inspects double-word memory slots inside each active frame, annotating return addresses (`Saved ra`), preserved callee-saved registers (`Saved s0`..`s11`), and local arguments.
+  - Verifies 16-byte stack pointer alignment with status badge (`16-byte ALIGNED ✓` or `MISALIGNED ✗`).
+
+#### 8. Standard GNU Mode & Two-Way In-Editor Transpiler (`:mode`, `:transpile`)
+- **Dialect Switching (`:mode [gnu|rvs]`)**:
+  - Standard RVS Dialect (default): Strict educational 3-operand instructions and directives (`DD`, `DW`, `DH`, `DB`, `DC`, `DF`, `DM`).
+  - Standard GNU Mode: Directly assemble code written with GNU directives (`.word`, `.dword`, `.half`, `.byte`, `.float`, `.asciz`, `.string`, `.ascii`, `.zero`, `.space`, `.org`) and pseudo-instructions (`li`, `la`, `mv`, `ret`, `call`, `tail`, `j`, `jr`, `nop`, `not`, `neg`, `negw`, `sext.w`, `seqz`, `snez`, `sltz`, `sgtz`, `beqz`, `bnez`, `blez`, `bgez`, `bltz`, `bgtz`, `bgt`, `ble`, `bgtu`, `bleu`, `fmv.s`, `fabs.s`, `fneg.s`, etc.) while gracefully stripping non-code metadata (`.text`, `.data`, `.globl`, `.section`, `.align`).
+- **Two-Way Transpiler (`:transpile [gnu|rvs]`)**:
+  - `:transpile rvs`: Lowers GNU pseudo-instructions and directives into canonical RVS dialect directly inside the editor buffer.
+  - `:transpile gnu`: Compresses canonical 3-operand instructions back into idiomatic GNU RISC-V pseudo-instructions.
+
 ---
 
 ### Colon Command Reference (`:`)
@@ -308,12 +327,14 @@ Press `:` in Normal mode to enter Command mode:
 | `:mem <sp\|addr\|label>` | Jump memory view to stack pointer or address |
 | `:color [on\|off]` | Toggle or set Listing correlated bitfield colorizing |
 | `:cc [on\|off]` | Toggle Calling Convention compliance checker |
+| `:mode [gnu\|rvs]` | Toggle or set assembly dialect mode |
+| `:transpile [gnu\|rvs]` | Transpile current editor buffer between GNU and RVS syntax |
 | `:stats` / `:metrics` | Open Execution Metrics & Hardware Counters dialog |
+| `:stack` / `:callstack` | Open Call Stack & Stack Frame Visualizer dialog |
 | `:zoom` / `:z` | Toggle fullscreen zoom on focused pane |
 | `:clear` | Clear `Exec` trace log and `OUT` output |
 | `:edit` / `:nvim` | Open current buffer in external `$EDITOR` |
 | `:help` / `:h` | Open Help / About modal |
----
 
 ## Testing
 

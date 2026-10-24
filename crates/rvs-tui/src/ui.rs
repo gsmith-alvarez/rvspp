@@ -358,7 +358,8 @@ pub(crate) fn visual_col_at(line: &str, char_col: usize, tab_width: usize) -> us
 fn draw_source(f: &mut Frame, app: &mut App, area: Rect) {
     let active = app.focus == Pane::Source;
     let is_zoomed = app.zoomed_pane == Some(Pane::Source);
-    let block = pane_block("Source", active, is_zoomed);
+    let title = format!("Source [{}]", app.sim.dialect.name());
+    let block = pane_block(&title, active, is_zoomed);
     let inner = block.inner(area);
     f.render_widget(Clear, area);
     f.render_widget(block, area);
@@ -879,6 +880,7 @@ fn draw_mem(f: &mut Frame, app: &mut App, area: Rect) {
         pill("TXT", app.sim.view.mem_txt),
         btn("SP"),
         btn("0x0"),
+        btn("STACK"),
     ]);
     f.render_widget(Paragraph::new(toolbar), toolbar_area);
 }
@@ -941,6 +943,7 @@ fn draw_exec(f: &mut Frame, app: &mut App, area: Rect) {
         btn("Clear"),
         btn("STATS"),
         pill(cc_label, app.sim.convention.enabled),
+        btn("STACK"),
     ]);
     f.render_widget(Paragraph::new(toolbar), toolbar_area);
 }
@@ -1411,6 +1414,80 @@ fn draw_modal(f: &mut Frame, app: &mut App, area: Rect) {
 
             f.render_widget(Paragraph::new(text).wrap(Wrap { trim: true }), inner);
         }
+        Modal::CallStack => {
+            let modal_area = centered_rect(82, 80, area);
+            f.render_widget(Clear, modal_area);
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Double)
+                .border_style(Style::default().fg(Color::LightBlue))
+                .title(" Call Stack & Stack Frame Visualizer (:stack) ");
+            let inner = block.inner(modal_area);
+            f.render_widget(block, modal_area);
+
+            let frames = app.sim.get_stack_frames();
+            let cur_sp = app.sim.regs.read_x(2);
+            let is_aligned = cur_sp % 16 == 0;
+
+            let mut text = vec![
+                Line::styled("Active Call Frames & Stack Hierarchy", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Line::raw(""),
+                Line::from(vec![
+                    Span::styled("  Current $sp: ", Style::default().fg(Color::Cyan)),
+                    Span::styled(format!("0x{:016x}", cur_sp), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("   Alignment: ", Style::default().fg(Color::Cyan)),
+                    if is_aligned {
+                        Span::styled("16-byte ALIGNED ✓", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+                    } else {
+                        Span::styled("MISALIGNED ✗", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+                    },
+                    Span::styled("   Call Stack Depth: ", Style::default().fg(Color::Cyan)),
+                    Span::styled(format!("{} frames", frames.len()), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                ]),
+                Line::raw(""),
+            ];
+
+            if frames.is_empty() {
+                text.push(Line::styled(
+                    "  (no active function call frames — call a function via 'jal ra, ...' or 'call ...')",
+                    Style::default().fg(Color::DarkGray),
+                ));
+            } else {
+                for frame in frames.iter().rev() {
+                    text.push(Line::from(vec![
+                        Span::styled(format!("  ┌ Frame {}: ", frame.depth), Style::default().fg(Color::LightBlue).add_modifier(Modifier::BOLD)),
+                        Span::styled(&frame.function_name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                        Span::styled(format!(" [0x{:x}]", frame.target_pc), Style::default().fg(Color::Cyan)),
+                        Span::styled(" called from ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(format!("{} (0x{:x})", frame.caller_name, frame.call_pc), Style::default().fg(Color::Yellow)),
+                    ]));
+                    text.push(Line::styled(
+                        format!("  │   sp: 0x{:016x} → 0x{:016x} (size: {} bytes)", frame.frame_sp, frame.parent_sp, frame.frame_size),
+                        Style::default().fg(Color::DarkGray),
+                    ));
+
+                    if frame.slots.is_empty() {
+                        text.push(Line::styled("  │   (no double-words written to stack in this frame)", Style::default().fg(Color::DarkGray)));
+                    } else {
+                        for slot in &frame.slots {
+                            text.push(Line::from(vec![
+                                Span::styled("  │   ", Style::default().fg(Color::LightBlue)),
+                                Span::styled(format!("0x{:016x}", slot.address), Style::default().fg(Color::Cyan)),
+                                Span::styled(" : ", Style::default().fg(Color::DarkGray)),
+                                Span::styled(format!("0x{:016x}", slot.value), Style::default().fg(Color::White)),
+                                Span::styled(format!("  ({})", slot.annotation), Style::default().fg(Color::LightGreen)),
+                            ]));
+                        }
+                    }
+                    text.push(Line::styled("  └─────────────────────────────────────────────────────────────", Style::default().fg(Color::LightBlue)));
+                }
+            }
+
+            text.push(Line::raw(""));
+            text.push(Line::styled("Press Esc or Enter to close.", Style::default().fg(Color::DarkGray)));
+
+            f.render_widget(Paragraph::new(text).wrap(Wrap { trim: true }), inner);
+        }
     }
 }
 
@@ -1512,6 +1589,8 @@ pub fn handle_click(app: &mut App, col: u16, row: u16) {
                         app.toggle_pane_option(Pane::Mem, 5);
                     } else if rel_x >= 34 && rel_x < 42 {
                         app.toggle_pane_option(Pane::Mem, 6);
+                    } else if rel_x >= 42 && rel_x < 52 {
+                        app.toggle_pane_option(Pane::Mem, 7);
                     }
                 }
                 Pane::Exec => {
@@ -1521,6 +1600,8 @@ pub fn handle_click(app: &mut App, col: u16, row: u16) {
                         app.toggle_pane_option(Pane::Exec, 1);
                     } else if rel_x >= 18 && rel_x < 28 {
                         app.toggle_pane_option(Pane::Exec, 2);
+                    } else if rel_x >= 28 && rel_x < 38 {
+                        app.toggle_pane_option(Pane::Exec, 3);
                     }
                 }
                 Pane::Out => {

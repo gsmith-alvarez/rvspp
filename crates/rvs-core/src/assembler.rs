@@ -1000,7 +1000,14 @@ pub fn assemble(sim: &mut crate::Simulator, body: &str) -> Result<String, crate:
             return Err(crate::AsmError { progress: res, message: $msg.to_string() });
         }};
     }
-    for (line_idx, line) in body.split('\n').enumerate() {
+    let transpiled_storage;
+    let source_body = if sim.dialect == crate::transpiler::AssemblyDialect::Gnu {
+        transpiled_storage = crate::transpiler::transpile_gnu_to_rvs(body);
+        &transpiled_storage
+    } else {
+        body
+    };
+    for (line_idx, line) in source_body.split('\n').enumerate() {
         let parsed = split_line(line);
         res.push_str(line);
         res.push('\n');

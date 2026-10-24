@@ -11,6 +11,7 @@ pub mod format;
 pub mod memory;
 pub mod registers;
 pub mod tcl;
+pub mod transpiler;
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -103,9 +104,34 @@ impl ExecutionMetrics {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CallFrame {
     pub call_pc: u64,
+    pub target_pc: u64,
+    pub caller_name: String,
+    pub function_name: String,
     pub entry_sp: u64,
     pub saved_x: [u64; 12],
     pub saved_f: [u64; 12],
+}
+
+/// Single memory slot inspection inside an active stack frame.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StackSlot {
+    pub address: u64,
+    pub value: u64,
+    pub annotation: String,
+}
+
+/// High-level stack frame structure for visualization.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StackFrameInfo {
+    pub depth: usize,
+    pub function_name: String,
+    pub caller_name: String,
+    pub call_pc: u64,
+    pub target_pc: u64,
+    pub frame_sp: u64,
+    pub parent_sp: u64,
+    pub frame_size: u64,
+    pub slots: Vec<StackSlot>,
 }
 
 /// Standard RISC-V calling convention checker / linter.
@@ -128,7 +154,14 @@ impl ConventionChecker {
         self.violations.clear();
     }
 
-    pub fn on_call(&mut self, call_pc: u64, regs: &RegisterFile) -> Option<String> {
+    pub fn on_call(
+        &mut self,
+        call_pc: u64,
+        target_pc: u64,
+        caller_name: String,
+        function_name: String,
+        regs: &RegisterFile,
+    ) -> Option<String> {
         let sp = regs.read_x(2);
         let mut warning = None;
         if sp % 16 != 0 {
@@ -148,6 +181,9 @@ impl ConventionChecker {
 
         self.call_stack.push(CallFrame {
             call_pc,
+            target_pc,
+            caller_name,
+            function_name,
             entry_sp: sp,
             saved_x,
             saved_f,
@@ -237,6 +273,8 @@ pub struct Simulator {
     pub metrics: ExecutionMetrics,
     /// Calling convention compliance checker.
     pub convention: ConventionChecker,
+    /// Assembly dialect mode (RVS or GNU).
+    pub dialect: transpiler::AssemblyDialect,
 }
 
 impl Default for Simulator {
@@ -259,6 +297,7 @@ impl Default for Simulator {
             addr_to_line: BTreeMap::new(),
             metrics: ExecutionMetrics::default(),
             convention: ConventionChecker::default(),
+            dialect: transpiler::AssemblyDialect::default(),
         }
     }
 }
@@ -270,6 +309,86 @@ impl Simulator {
 
     /// The default `START` symbol when no machine instruction exists.
     pub const START_DEFAULT: &'static str = "0xfffffffffffffffc";
+
+    /// Resolves the nearest symbol or function name for an instruction address.
+    pub fn find_symbol_name(&self, addr: u64) -> String {
+        let hex_addr = tcl::a64(addr);
+        for (sym, target) in &self.sym {
+            if target == &hex_addr && sym != "START" {
+                return sym.clone();
+            }
+        }
+        if let Some(target) = self.sym.get("START") {
+            if target == &hex_addr {
+                return "START".to_string();
+            }
+        }
+        format!("sub_0x{:x}", addr)
+    }
+
+    /// Inspects the active stack frames based on `call_stack` and current `$sp`.
+    pub fn get_stack_frames(&self) -> Vec<StackFrameInfo> {
+        let mut frames = Vec::new();
+        let cur_sp = self.regs.read_x(2);
+
+        for (i, frame) in self.convention.call_stack.iter().enumerate() {
+            let next_sp = if i + 1 < self.convention.call_stack.len() {
+                self.convention.call_stack[i + 1].entry_sp
+            } else {
+                cur_sp
+            };
+
+            let frame_sp = std::cmp::min(frame.entry_sp, next_sp);
+            let parent_sp = std::cmp::max(frame.entry_sp, next_sp);
+            let frame_size = parent_sp.saturating_sub(frame_sp);
+
+            let mut slots = Vec::new();
+            if frame_size > 0 && frame_size <= 512 {
+                let mut addr = parent_sp.saturating_sub(8);
+                while addr >= frame_sp {
+                    let val = self.mem.read_bytes(addr, 8).unwrap_or(0);
+                    let mut annotation = String::from("Local / arg");
+
+                    if val == frame.call_pc.wrapping_add(4) {
+                        annotation = format!("Saved ra (ret 0x{:x})", val);
+                    } else {
+                        for (idx, &reg_val) in frame.saved_x.iter().enumerate() {
+                            if val == reg_val && val != 0 {
+                                let abi = crate::registers::abi_name(ConventionChecker::SAVED_X_INDICES[idx]);
+                                annotation = format!("Saved {}", abi);
+                                break;
+                            }
+                        }
+                    }
+
+                    slots.push(StackSlot {
+                        address: addr,
+                        value: val,
+                        annotation,
+                    });
+
+                    if addr < 8 || addr == frame_sp {
+                        break;
+                    }
+                    addr -= 8;
+                }
+            }
+
+            frames.push(StackFrameInfo {
+                depth: i,
+                function_name: frame.function_name.clone(),
+                caller_name: frame.caller_name.clone(),
+                call_pc: frame.call_pc,
+                target_pc: frame.target_pc,
+                frame_sp,
+                parent_sp,
+                frame_size,
+                slots,
+            });
+        }
+
+        frames
+    }
 }
 
 /// Assembly failure carrying the reference progress text and message.
