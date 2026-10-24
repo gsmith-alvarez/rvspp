@@ -992,13 +992,15 @@ pub fn assemble(sim: &mut crate::Simulator, body: &str) -> Result<String, crate:
     sim.regs.clear();
     sim.regs.pc = 0;
     sim.inp_prompt = false;
+    sim.line_to_addr.clear();
+    sim.addr_to_line.clear();
     let mut res = String::from("\n");
     macro_rules! fail {
         ($msg:expr) => {{
             return Err(crate::AsmError { progress: res, message: $msg.to_string() });
         }};
     }
-    for line in body.split('\n') {
+    for (line_idx, line) in body.split('\n').enumerate() {
         let parsed = split_line(line);
         res.push_str(line);
         res.push('\n');
@@ -1089,6 +1091,8 @@ pub fn assemble(sim: &mut crate::Simulator, body: &str) -> Result<String, crate:
                     fail!("Overwrite attempt");
                 }
                 let source = if first { lineorg.clone() } else { String::new() };
+                sim.line_to_addr.insert(line_idx, sim.regs.pc);
+                sim.addr_to_line.insert(sim.regs.pc, line_idx);
                 sim.mem.insert_dd(sim.regs.pc, &arg, &source);
                 first = false;
                 sim.regs.pc = sim.regs.pc.wrapping_add(8);
@@ -1139,6 +1143,8 @@ pub fn assemble(sim: &mut crate::Simulator, body: &str) -> Result<String, crate:
             arg_text = "x0,x0,0";
         }
         let norm = normalize_args(arg_text, &op);
+        sim.line_to_addr.insert(line_idx, sim.regs.pc);
+        sim.addr_to_line.insert(sim.regs.pc, line_idx);
         sim.mem
             .insert_instruction(sim.regs.pc, &op, norm, &lineorg);
         sim.regs.pc = sim.regs.pc.wrapping_add(4);

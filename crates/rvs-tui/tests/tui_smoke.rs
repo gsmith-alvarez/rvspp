@@ -645,17 +645,46 @@ fn test_tier1_debugging_features() {
     app.editor.set_text(src);
     app.compile();
 
-    // 1. Breakpoints: set breakpoint at address 0x8 via command ":b 0x8"
-    app.command_input = ":b 0x8".to_string();
+    // 1. Breakpoints on Source lines & PC:
+    // a) In Source pane on line 2 (row 1: addi x2, x0, 20), press 'B' in Normal mode
+    app.focus = Pane::Source;
+    app.editor.row = 1;
+    app.on_key(char_key('B'));
+    assert!(app.breakpoints.contains(&4), "Line 2 should map to address 0x4");
+    assert!(app.has_breakpoint_on_line(1));
+
+    // b) Run ':b' with no args while in Source on line 3 (row 2: add x3, x1, x2)
+    app.editor.row = 2;
+    app.command_input = ":b".to_string();
     app.execute_command();
-    assert!(app.breakpoints.contains(&8));
+    assert!(app.breakpoints.contains(&8), "Line 3 should map to address 0x8");
+    assert!(app.has_breakpoint_on_line(2));
 
-    // Render check: listing shows breakpoint dot
+    // c) Run ':b pc' to toggle breakpoint specifically at current PC (0x0)
+    app.command_input = ":b pc".to_string();
+    app.execute_command();
+    assert!(app.breakpoints.contains(&0));
+    // Toggle 0x0 back off so execution can proceed
+    app.command_input = ":b pc".to_string();
+    app.execute_command();
+    assert!(!app.breakpoints.contains(&0));
+
+    // Render check: both Source and Listing show breakpoint indicators
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
-    assert!(terminal.backend().to_string().contains("●"));
+    let frame = terminal.backend().to_string();
+    assert!(frame.contains("●"), "Listing and Source must show breakpoint dot");
 
-    // Run: must stop exactly at breakpoint 0x8 before executing it
+    // Run: must stop at first breakpoint (0x4, line 2) before executing it
     app.action_start();
+    while app.running {
+        app.run_chunk(std::time::Duration::from_millis(50));
+    }
+    assert_eq!(app.sim.regs.pc, 4);
+    assert_eq!(app.sim.regs.read_x(1), 10);
+    assert_eq!(app.sim.regs.read_x(2), 0); // line 2 not executed yet
+    assert!(app.status.contains("Breakpoint hit"));
+    // Continue run from 0x4 to next breakpoint at 0x8
+    app.action_run();
     while app.running {
         app.run_chunk(std::time::Duration::from_millis(50));
     }

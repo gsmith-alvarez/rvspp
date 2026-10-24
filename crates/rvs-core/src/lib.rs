@@ -84,6 +84,10 @@ pub struct Simulator {
     pub pending: Option<executor::PendingInput>,
     /// `::brk` run-interrupt flag.
     pub brk: bool,
+    /// Mapping from source line index (0-based) to instruction/data address.
+    pub line_to_addr: BTreeMap<usize, u64>,
+    /// Mapping from instruction/data address to source line index (0-based).
+    pub addr_to_line: BTreeMap<u64, usize>,
 }
 
 impl Default for Simulator {
@@ -102,6 +106,8 @@ impl Default for Simulator {
             entry_type: String::new(),
             pending: None,
             brk: false,
+            line_to_addr: BTreeMap::new(),
+            addr_to_line: BTreeMap::new(),
         }
     }
 }

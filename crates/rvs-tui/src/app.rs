@@ -204,6 +204,7 @@ pub struct App {
     pub breakpoints: std::collections::BTreeSet<u64>,
     pub step_history: std::collections::VecDeque<SimStateSnapshot>,
     pub run_speed: RunSpeed,
+    pub at_breakpoint: bool,
     last_regs: RegSnapshot,
     changed_x: [bool; 32],
     changed_f: [bool; 32],
@@ -262,6 +263,7 @@ impl App {
             breakpoints: std::collections::BTreeSet::new(),
             step_history: std::collections::VecDeque::new(),
             run_speed: RunSpeed::Max,
+            at_breakpoint: false,
             last_regs: RegSnapshot::default(),
             changed_x: [false; 32],
             changed_f: [false; 32],
@@ -361,6 +363,7 @@ impl App {
         self.reset_pc();
         self.sim.exec_log.push_str("START\n");
         self.sim.inp_prompt = false;
+        self.at_breakpoint = false;
         self.running = true;
         self.was_running = false;
         self.mode = Mode::Running;
@@ -468,6 +471,33 @@ impl App {
 
     pub fn toggle_breakpoint_at_pc(&mut self) {
         self.toggle_breakpoint(self.sim.regs.pc);
+        self.status = format!("Breakpoint toggled at PC (0x{:016x})", self.sim.regs.pc);
+    }
+
+    pub fn has_breakpoint_on_line(&self, line_idx: usize) -> bool {
+        if let Some(&addr) = self.sim.line_to_addr.get(&line_idx) {
+            self.breakpoints.contains(&addr)
+        } else {
+            false
+        }
+    }
+
+    pub fn toggle_breakpoint_at_source_line(&mut self, line_idx: usize) {
+        if let Some(&addr) = self.sim.line_to_addr.get(&line_idx) {
+            self.toggle_breakpoint(addr);
+            self.status = format!("Breakpoint toggled at line {} (0x{addr:016x})", line_idx + 1);
+        } else {
+            let closest = self.sim.line_to_addr.range(line_idx..).next();
+            if let Some((&l, &addr)) = closest {
+                self.toggle_breakpoint(addr);
+                self.status = format!("Breakpoint toggled at line {} (0x{addr:016x})", l + 1);
+            } else if let Some((&l, &addr)) = self.sim.line_to_addr.iter().next_back() {
+                self.toggle_breakpoint(addr);
+                self.status = format!("Breakpoint toggled at line {} (0x{addr:016x})", l + 1);
+            } else {
+                self.status = format!("No compiled code for line {}", line_idx + 1);
+            }
+        }
     }
 
     pub fn clear_all_breakpoints(&mut self) {
@@ -504,14 +534,18 @@ impl App {
     /// `RunCmd` chunk: bounded stepping so the TUI stays responsive.
     pub fn run_chunk(&mut self, budget: Duration) {
         let start = Instant::now();
+        let mut first = true;
         while !self.sim.brk {
-            if self.breakpoints.contains(&self.sim.regs.pc) {
+            if (!first || !self.at_breakpoint) && self.breakpoints.contains(&self.sim.regs.pc) {
                 self.running = false;
                 self.was_running = false;
                 self.mode = Mode::Normal;
+                self.at_breakpoint = true;
                 self.status = format!("Breakpoint hit at 0x{:016x}", self.sim.regs.pc);
                 break;
             }
+            self.at_breakpoint = false;
+            first = false;
             if start.elapsed() >= budget {
                 break;
             }
@@ -962,6 +996,16 @@ impl App {
                         self.status = format!("Run speed: {}", self.run_speed.label());
                         return;
                     }
+                    KeyCode::Char('B') => {
+                        self.pending_op = None;
+                        if self.focus == Pane::Source {
+                            let row = self.editor.row;
+                            self.toggle_breakpoint_at_source_line(row);
+                        } else {
+                            self.toggle_breakpoint_at_pc();
+                        }
+                        return;
+                    }
                     KeyCode::Char('x') if self.focus != Pane::Source || self.mode == Mode::Running => {
                         self.pending_op = None;
                         self.action_stop();
@@ -1014,6 +1058,11 @@ impl App {
                     self.pending_op = None;
                     self.editor.move_end();
                     self.mode = Mode::Edit;
+                }
+                KeyCode::Char('B') => {
+                    self.pending_op = None;
+                    let row = self.editor.row;
+                    self.toggle_breakpoint_at_source_line(row);
                 }
                 KeyCode::Char('o') => {
                     self.pending_op = None;
@@ -1369,14 +1418,24 @@ impl App {
             }
             "b" | "break" | "breakpoint" => {
                 if args.is_empty() {
+                    if self.focus == Pane::Source {
+                        let row = self.editor.row;
+                        self.toggle_breakpoint_at_source_line(row);
+                    } else {
+                        self.toggle_breakpoint_at_pc();
+                    }
+                } else if args.eq_ignore_ascii_case("pc") {
                     self.toggle_breakpoint_at_pc();
+                } else if let Ok(line_num) = args.parse::<usize>() {
+                    let line_idx = line_num.saturating_sub(1);
+                    self.toggle_breakpoint_at_source_line(line_idx);
                 } else if let Some(addr_str) = self.sim.sym.get(args) {
                     let addr = rvs_core::tcl::parse_int(addr_str).unwrap_or(0) as u64;
                     self.toggle_breakpoint(addr);
                 } else if let Some(addr) = rvs_core::tcl::parse_int(args) {
                     self.toggle_breakpoint(addr as u64);
                 } else {
-                    self.status = format!("ERROR: Invalid address or unknown label \"{args}\"");
+                    self.status = format!("ERROR: Invalid address, line number, or label \"{args}\"");
                 }
             }
             "cb" | "clearbreaks" => {

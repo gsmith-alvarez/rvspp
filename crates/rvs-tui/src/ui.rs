@@ -381,8 +381,16 @@ fn draw_source(f: &mut Frame, app: &mut App, area: Rect) {
 
     for (idx, line_str) in app.editor.lines.iter().enumerate().skip(app.editor.offset_row).take(height) {
         let is_cur = idx == app.editor.row && active;
+        let has_bp = app.has_breakpoint_on_line(idx);
+        let bp_mark = if has_bp {
+            Span::styled("● ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+        } else {
+            Span::raw("  ")
+        };
         let num_str = format!("{line:>width$} ", line = idx + 1, width = num_digits);
-        let num_style = if is_cur {
+        let num_style = if has_bp {
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+        } else if is_cur {
             Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::DarkGray)
@@ -391,6 +399,7 @@ fn draw_source(f: &mut Frame, app: &mut App, area: Rect) {
         let expanded = expand_tabs(line_str, 8);
         let mut spans = crate::syntax::highlight_source_line(&expanded);
         spans.insert(0, Span::styled(num_str, num_style));
+        spans.insert(0, bp_mark);
         lines.push(Line::from(spans));
     }
 
@@ -403,7 +412,7 @@ fn draw_source(f: &mut Frame, app: &mut App, area: Rect) {
             app.editor.col
         };
         let screen_row = text_area.y + (app.editor.row.saturating_sub(app.editor.offset_row)) as u16;
-        let screen_col = text_area.x + (num_digits + 1) as u16 + (visual_col.saturating_sub(app.editor.offset_col)) as u16;
+        let screen_col = text_area.x + 2 + (num_digits + 1) as u16 + (visual_col.saturating_sub(app.editor.offset_col)) as u16;
         if screen_row < text_area.y + text_area.height && screen_col < text_area.x + text_area.width {
             f.set_cursor_position((screen_col, screen_row));
         }
