@@ -437,7 +437,7 @@ fn draw_listing(f: &mut Frame, app: &mut App, area: Rect) {
             Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
         ));
 
-        let mut cols = vec![("ADDRESS", 18)];
+        let mut cols = vec![("  ADDRESS", 20)];
         if app.sim.view.list_bin {
             cols.push(("BIN / HEX CODE", 40));
         }
@@ -459,12 +459,20 @@ fn draw_listing(f: &mut Frame, app: &mut App, area: Rect) {
 
         for (&addr, cell) in app.sim.mem.cells.iter() {
             let is_pc = addr == app.sim.regs.pc;
+            let has_bp = app.breakpoints.contains(&addr);
+            let bp_span = if has_bp {
+                Span::styled("● ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+            } else {
+                Span::raw("  ")
+            };
             let addr_style = if is_pc {
                 Style::default().bg(Color::Cyan).fg(Color::Black).add_modifier(Modifier::BOLD)
+            } else if has_bp {
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::Cyan)
             };
-            let mut row_spans = vec![Span::styled(format!("0x{addr:016x}"), addr_style)];
+            let mut row_spans = vec![bp_span, Span::styled(format!("0x{addr:016x}"), addr_style)];
 
             match cell {
                 rvs_core::memory::MemoryCell::Data { value, case, expr, source_line } => {
@@ -600,11 +608,14 @@ fn draw_listing(f: &mut Frame, app: &mut App, area: Rect) {
     let lines: Vec<Line> = all_rows.into_iter().skip(app.scroll_listing).take(height).collect();
     f.render_widget(Paragraph::new(lines), text_area);
 
+    let spd_label = format!("SPD:{}", app.run_speed.label());
     let toolbar = Line::from(vec![
         btn("InitPC"),
         Span::styled(format!(" PC:0x{:016x} ", app.sim.regs.pc), Style::default().fg(Color::White)),
         pill("TXT", app.sim.view.exec_txt),
         pill("CLR", app.colorize_listing),
+        pill(&spd_label, app.run_speed != crate::app::RunSpeed::Max),
+        pill("BP", !app.breakpoints.is_empty()),
     ]);
     f.render_widget(Paragraph::new(toolbar), toolbar_area);
 }
@@ -857,6 +868,8 @@ fn draw_mem(f: &mut Frame, app: &mut App, area: Rect) {
         pill("INT", app.sim.view.mem_int),
         pill("FLP", app.sim.view.mem_flp),
         pill("TXT", app.sim.view.mem_txt),
+        btn("SP"),
+        btn("0x0"),
     ]);
     f.render_widget(Paragraph::new(toolbar), toolbar_area);
 }
@@ -1042,7 +1055,10 @@ fn draw_modal(f: &mut Frame, app: &mut App, area: Rect) {
                 Line::raw("  s, :start        - START (reset PC to START)"),
                 Line::raw("  n, :next         - Next / Step one instruction (or :n <count>)"),
                 Line::raw("  r, :run          - Run continuously"),
-                Line::raw("  x, :stop         - Stop continuous run (non-Source)"),
+                Line::raw("  p, P, N          - Step back / Prev (rewind 1 instruction)"),
+                Line::raw("  b, :b <addr>     - Toggle breakpoint (run stops at breakpoint)"),
+                Line::raw("  +, - ([, ])      - Adjust animation speed (1Hz, 5Hz, 20Hz, Max)"),
+                Line::raw("  s, 0 in Mem      - Jump memory view to $sp (stack) or 0x0"),
                 Line::raw("  1 / 2            - Listing pane: toggle TXT / CLR (correlated colorizing)"),
                 Line::raw("  :color [on|off]  - Toggle or set Listing correlated colorizing"),
                 Line::raw("  q, :q, :q!       - Quit simulator"),
@@ -1369,6 +1385,10 @@ pub fn handle_click(app: &mut App, col: u16, row: u16) {
                         app.toggle_pane_option(Pane::Listing, 1);
                     } else if rel_x >= 38 && rel_x < 45 {
                         app.toggle_pane_option(Pane::Listing, 2);
+                    } else if rel_x >= 45 && rel_x < 56 {
+                        app.toggle_pane_option(Pane::Listing, 3);
+                    } else if rel_x >= 56 && rel_x < 63 {
+                        app.toggle_pane_option(Pane::Listing, 4);
                     }
                 }
                 Pane::Regs => {
@@ -1389,6 +1409,10 @@ pub fn handle_click(app: &mut App, col: u16, row: u16) {
                         app.toggle_pane_option(Pane::Mem, 3);
                     } else if rel_x >= 21 && rel_x < 28 {
                         app.toggle_pane_option(Pane::Mem, 4);
+                    } else if rel_x >= 28 && rel_x < 34 {
+                        app.toggle_pane_option(Pane::Mem, 5);
+                    } else if rel_x >= 34 && rel_x < 42 {
+                        app.toggle_pane_option(Pane::Mem, 6);
                     }
                 }
                 Pane::Exec => {

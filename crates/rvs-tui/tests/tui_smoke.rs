@@ -634,3 +634,66 @@ fn test_listing_correlated_colorizing_and_toggle() {
         assert_eq!(app.colorize_listing, expected);
     }
 }
+
+#[test]
+fn test_tier1_debugging_features() {
+    let backend = TestBackend::new(140, 36);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    let mut app = App::new(None);
+    let src = "START: addi x1, x0, 10\naddi x2, x0, 20\nadd x3, x1, x2\nebreak x0, x0, 0\n";
+    app.editor.set_text(src);
+    app.compile();
+
+    // 1. Breakpoints: set breakpoint at address 0x8 via command ":b 0x8"
+    app.command_input = ":b 0x8".to_string();
+    app.execute_command();
+    assert!(app.breakpoints.contains(&8));
+
+    // Render check: listing shows breakpoint dot
+    terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+    assert!(terminal.backend().to_string().contains("●"));
+
+    // Run: must stop exactly at breakpoint 0x8 before executing it
+    app.action_start();
+    while app.running {
+        app.run_chunk(std::time::Duration::from_millis(50));
+    }
+    assert_eq!(app.sim.regs.pc, 8);
+    assert_eq!(app.sim.regs.read_x(1), 10);
+    assert_eq!(app.sim.regs.read_x(2), 20);
+    assert_eq!(app.sim.regs.read_x(3), 0);
+    assert!(app.status.contains("Breakpoint hit"));
+
+    // 2. Step back: execute 1 step forward, then step back
+    app.action_next();
+    assert_eq!(app.sim.regs.pc, 12);
+    assert_eq!(app.sim.regs.read_x(3), 30);
+
+    // Press 'p' to rewind / step back
+    app.focus = Pane::Listing;
+    app.on_key(char_key('p'));
+    assert_eq!(app.sim.regs.pc, 8);
+    assert_eq!(app.sim.regs.read_x(3), 0);
+    assert!(app.status.contains("Stepped back"));
+
+    // 3. Execution speed adjustments:
+    assert_eq!(app.run_speed, rvs_tui::app::RunSpeed::Max);
+    app.on_key(char_key('+'));
+    assert_eq!(app.run_speed, rvs_tui::app::RunSpeed::Hz1);
+    app.command_input = ":speed 20".to_string();
+    app.execute_command();
+    assert_eq!(app.run_speed, rvs_tui::app::RunSpeed::Hz20);
+
+    // 4. Memory navigation & stack pointer jump
+    app.sim.regs.write_x(2, 0x2000, false);
+    app.sim.mem.insert_dd(0x2000, "12345", "12345");
+    app.focus = Pane::Mem;
+    app.command_input = ":mem sp".to_string();
+    app.execute_command();
+    assert!(app.status.contains("Jumped memory view to 0x0000000000002000"));
+
+    // Button [SP] in Mem toolbar (slot 5)
+    app.toggle_pane_option(Pane::Mem, 5);
+    assert!(app.status.contains("Jumped memory view to 0x0000000000002000"));
+}

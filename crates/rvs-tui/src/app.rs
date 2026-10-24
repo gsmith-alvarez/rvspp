@@ -118,6 +118,59 @@ struct RegSnapshot {
     x: [u64; 32],
     f: [u64; 32],
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum RunSpeed {
+    Hz1,
+    Hz5,
+    Hz20,
+    #[default]
+    Max,
+}
+
+impl RunSpeed {
+    pub fn next(self) -> Self {
+        match self {
+            RunSpeed::Hz1 => RunSpeed::Hz5,
+            RunSpeed::Hz5 => RunSpeed::Hz20,
+            RunSpeed::Hz20 => RunSpeed::Max,
+            RunSpeed::Max => RunSpeed::Hz1,
+        }
+    }
+    pub fn prev(self) -> Self {
+        match self {
+            RunSpeed::Hz1 => RunSpeed::Max,
+            RunSpeed::Hz5 => RunSpeed::Hz1,
+            RunSpeed::Hz20 => RunSpeed::Hz5,
+            RunSpeed::Max => RunSpeed::Hz20,
+        }
+    }
+    pub fn delay(self) -> Option<Duration> {
+        match self {
+            RunSpeed::Hz1 => Some(Duration::from_millis(1000)),
+            RunSpeed::Hz5 => Some(Duration::from_millis(200)),
+            RunSpeed::Hz20 => Some(Duration::from_millis(50)),
+            RunSpeed::Max => None,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            RunSpeed::Hz1 => "1Hz",
+            RunSpeed::Hz5 => "5Hz",
+            RunSpeed::Hz20 => "20Hz",
+            RunSpeed::Max => "Max",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SimStateSnapshot {
+    pub regs: rvs_core::registers::RegisterFile,
+    pub mem: rvs_core::memory::Memory,
+    pub exec_log: String,
+    pub output: String,
+    pub pc: u64,
+}
+
 
 pub struct App {
     pub sim: Simulator,
@@ -148,6 +201,9 @@ pub struct App {
     pub zoomed_pane: Option<Pane>,
     pub pending_external_editor: bool,
     pub colorize_listing: bool,
+    pub breakpoints: std::collections::BTreeSet<u64>,
+    pub step_history: std::collections::VecDeque<SimStateSnapshot>,
+    pub run_speed: RunSpeed,
     last_regs: RegSnapshot,
     changed_x: [bool; 32],
     changed_f: [bool; 32],
@@ -203,6 +259,9 @@ impl App {
             zoomed_pane: None,
             pending_external_editor: false,
             colorize_listing: true,
+            breakpoints: std::collections::BTreeSet::new(),
+            step_history: std::collections::VecDeque::new(),
+            run_speed: RunSpeed::Max,
             last_regs: RegSnapshot::default(),
             changed_x: [false; 32],
             changed_f: [false; 32],
@@ -228,6 +287,8 @@ impl App {
         self.scroll_out = 0;
         self.take_reg_snapshot();
         self.needs_full_clear = true;
+        self.breakpoints.clear();
+        self.step_history.clear();
     }
 
     pub fn compile(&mut self) {
@@ -349,6 +410,16 @@ impl App {
     }
 
     fn do_step(&mut self) {
+        if self.step_history.len() >= 128 {
+            self.step_history.pop_front();
+        }
+        self.step_history.push_back(SimStateSnapshot {
+            regs: self.sim.regs.clone(),
+            mem: self.sim.mem.clone(),
+            exec_log: self.sim.exec_log.clone(),
+            output: self.sim.output.clone(),
+            pc: self.sim.regs.pc,
+        });
         self.take_reg_snapshot();
         match executor::step(&mut self.sim) {
             StepResult::Continued => {}
@@ -368,6 +439,61 @@ impl App {
         self.mark_changed_regs();
     }
 
+    pub fn action_step_back(&mut self) {
+        if let Some(snap) = self.step_history.pop_back() {
+            self.sim.regs = snap.regs;
+            self.sim.mem = snap.mem;
+            self.sim.exec_log = snap.exec_log;
+            self.sim.output = snap.output;
+            self.sim.regs.pc = snap.pc;
+            self.take_reg_snapshot();
+            self.needs_full_clear = true;
+            self.status = format!("Stepped back to 0x{:016x}", self.sim.regs.pc);
+        } else {
+            self.status = "No earlier step history to rewind".to_string();
+        }
+    }
+
+    pub fn toggle_breakpoint(&mut self, addr: u64) {
+        let is_set = if self.breakpoints.contains(&addr) {
+            self.breakpoints.remove(&addr);
+            false
+        } else {
+            self.breakpoints.insert(addr);
+            true
+        };
+        self.status = format!("Breakpoint {} at 0x{addr:016x}", if is_set { "set" } else { "cleared" });
+        self.needs_full_clear = true;
+    }
+
+    pub fn toggle_breakpoint_at_pc(&mut self) {
+        self.toggle_breakpoint(self.sim.regs.pc);
+    }
+
+    pub fn clear_all_breakpoints(&mut self) {
+        self.breakpoints.clear();
+        self.status = "Cleared all breakpoints".to_string();
+        self.needs_full_clear = true;
+    }
+
+    pub fn jump_mem_to_address(&mut self, target_addr: u64) {
+        if self.sim.mem.cells.is_empty() {
+            self.scroll_mem = 0;
+            self.status = format!("Memory empty; jump to 0x{target_addr:016x} stored");
+            return;
+        }
+        let keys: Vec<u64> = self.sim.mem.cells.keys().copied().collect();
+        let closest_idx = keys.iter().position(|&k| k >= target_addr).unwrap_or(keys.len().saturating_sub(1));
+        self.scroll_mem = closest_idx;
+        self.status = format!("Jumped memory view to 0x{target_addr:016x}");
+        self.needs_full_clear = true;
+    }
+
+    pub fn jump_mem_to_sp(&mut self) {
+        let sp = self.sim.regs.read_x(2);
+        self.jump_mem_to_address(sp);
+    }
+
     fn mark_changed_regs(&mut self) {
         for i in 0..32 {
             self.changed_x[i] = self.sim.regs.x_values()[i] != self.last_regs.x[i];
@@ -379,6 +505,13 @@ impl App {
     pub fn run_chunk(&mut self, budget: Duration) {
         let start = Instant::now();
         while !self.sim.brk {
+            if self.breakpoints.contains(&self.sim.regs.pc) {
+                self.running = false;
+                self.was_running = false;
+                self.mode = Mode::Normal;
+                self.status = format!("Breakpoint hit at 0x{:016x}", self.sim.regs.pc);
+                break;
+            }
             if start.elapsed() >= budget {
                 break;
             }
@@ -807,6 +940,28 @@ impl App {
                         self.request_quit();
                         return;
                     }
+                    KeyCode::Char('p') if self.focus != Pane::Source => {
+                        self.pending_op = None;
+                        self.action_step_back();
+                        return;
+                    }
+                    KeyCode::Char('P') | KeyCode::Char('N') => {
+                        self.pending_op = None;
+                        self.action_step_back();
+                        return;
+                    }
+                    KeyCode::Char('+') | KeyCode::Char(']') => {
+                        self.pending_op = None;
+                        self.run_speed = self.run_speed.next();
+                        self.status = format!("Run speed: {}", self.run_speed.label());
+                        return;
+                    }
+                    KeyCode::Char('-') | KeyCode::Char('[') => {
+                        self.pending_op = None;
+                        self.run_speed = self.run_speed.prev();
+                        self.status = format!("Run speed: {}", self.run_speed.label());
+                        return;
+                    }
                     KeyCode::Char('x') if self.focus != Pane::Source || self.mode == Mode::Running => {
                         self.pending_op = None;
                         self.action_stop();
@@ -1030,6 +1185,18 @@ impl App {
                     self.pending_op = None;
                     self.toggle_pane_option(pane, 5);
                 }
+                KeyCode::Char('b') if pane == Pane::Listing => {
+                    self.pending_op = None;
+                    self.toggle_breakpoint_at_pc();
+                }
+                KeyCode::Char('s') | KeyCode::Char('S') if pane == Pane::Mem => {
+                    self.pending_op = None;
+                    self.jump_mem_to_sp();
+                }
+                KeyCode::Char('0') if pane == Pane::Mem => {
+                    self.pending_op = None;
+                    self.jump_mem_to_address(0);
+                }
                 KeyCode::Char('i') | KeyCode::Char('0') if pane == Pane::Listing => {
                     self.pending_op = None;
                     self.reset_pc();
@@ -1198,6 +1365,49 @@ impl App {
                     self.colorize_listing = false;
                 } else {
                     self.colorize_listing = !self.colorize_listing;
+                }
+            }
+            "b" | "break" | "breakpoint" => {
+                if args.is_empty() {
+                    self.toggle_breakpoint_at_pc();
+                } else if let Some(addr_str) = self.sim.sym.get(args) {
+                    let addr = rvs_core::tcl::parse_int(addr_str).unwrap_or(0) as u64;
+                    self.toggle_breakpoint(addr);
+                } else if let Some(addr) = rvs_core::tcl::parse_int(args) {
+                    self.toggle_breakpoint(addr as u64);
+                } else {
+                    self.status = format!("ERROR: Invalid address or unknown label \"{args}\"");
+                }
+            }
+            "cb" | "clearbreaks" => {
+                self.clear_all_breakpoints();
+            }
+            "p" | "prev" | "back" | "stepback" => {
+                self.action_step_back();
+            }
+            "speed" | "spd" => {
+                match args.to_lowercase().as_str() {
+                    "1" | "1hz" => self.run_speed = RunSpeed::Hz1,
+                    "5" | "5hz" => self.run_speed = RunSpeed::Hz5,
+                    "20" | "20hz" => self.run_speed = RunSpeed::Hz20,
+                    "max" | "fast" => self.run_speed = RunSpeed::Max,
+                    "" => self.run_speed = self.run_speed.next(),
+                    _ => self.status = format!("ERROR: Expected speed 1, 5, 20, or max; got \"{args}\""),
+                }
+                self.status = format!("Run speed: {}", self.run_speed.label());
+            }
+            "mem" | "memory" => {
+                if args == "sp" || args == "stack" {
+                    self.jump_mem_to_sp();
+                } else if let Some(addr_str) = self.sim.sym.get(args) {
+                    let addr = rvs_core::tcl::parse_int(addr_str).unwrap_or(0) as u64;
+                    self.jump_mem_to_address(addr);
+                } else if let Some(addr) = rvs_core::tcl::parse_int(args) {
+                    self.jump_mem_to_address(addr as u64);
+                } else if args.is_empty() {
+                    self.jump_mem_to_address(0);
+                } else {
+                    self.status = format!("ERROR: Invalid memory address or symbol \"{args}\"");
                 }
             }
             other => {
@@ -1438,6 +1648,11 @@ impl App {
         match (pane, slot) {
             (Pane::Listing, 1) => self.sim.view.exec_txt = !self.sim.view.exec_txt,
             (Pane::Listing, 2) => self.colorize_listing = !self.colorize_listing,
+            (Pane::Listing, 3) => {
+                self.run_speed = self.run_speed.next();
+                self.status = format!("Run speed: {}", self.run_speed.label());
+            }
+            (Pane::Listing, 4) => self.toggle_breakpoint_at_pc(),
             (Pane::Regs, 1) => self.sim.view.reg_hex = !self.sim.view.reg_hex,
             (Pane::Regs, 2) => self.sim.view.reg_int = !self.sim.view.reg_int,
             (Pane::Regs, 3) => self.sim.view.reg_flp = !self.sim.view.reg_flp,
@@ -1445,6 +1660,8 @@ impl App {
             (Pane::Mem, 2) => self.sim.view.mem_int = !self.sim.view.mem_int,
             (Pane::Mem, 3) => self.sim.view.mem_flp = !self.sim.view.mem_flp,
             (Pane::Mem, 4) => self.sim.view.mem_txt = !self.sim.view.mem_txt,
+            (Pane::Mem, 5) => self.jump_mem_to_sp(),
+            (Pane::Mem, 6) => self.jump_mem_to_address(0),
             (Pane::Out, 1 | 5) => {
                 if self.dma_out_available {
                     self.sim.view.dma_out = !self.sim.view.dma_out;
@@ -1689,7 +1906,7 @@ fn event_loop(
         }
         terminal.draw(|f| ui::draw(f, &mut app))?;
         let timeout = if app.running {
-            Duration::from_millis(16)
+            app.run_speed.delay().unwrap_or(Duration::from_millis(16))
         } else {
             Duration::from_millis(80)
         };
@@ -1708,7 +1925,11 @@ fn event_loop(
             let _ = app.run_external_editor(terminal);
         }
         if app.running {
-            app.run_chunk(Duration::from_millis(8));
+            if app.run_speed == RunSpeed::Max {
+                app.run_chunk(Duration::from_millis(8));
+            } else {
+                app.do_step();
+            }
         }
         app.tick += 1;
         if app.quit_requested {
