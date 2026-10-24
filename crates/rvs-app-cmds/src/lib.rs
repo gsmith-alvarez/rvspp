@@ -27,6 +27,19 @@ pub trait AppCommands {
     ) -> Result<(), Box<dyn std::error::Error>>;
 }
 
+/// Create a private temp buffer whose path ends in `.s`, so editors still
+/// detect assembly syntax. The file is unlinked when the returned handle drops.
+fn write_temp_buffer(text: &str) -> std::io::Result<(PathBuf, tempfile::NamedTempFile)> {
+    use std::io::Write as _;
+
+    let mut file = tempfile::Builder::new()
+        .prefix("rvs_buf_")
+        .suffix(".s")
+        .tempfile_in(std::env::temp_dir())?;
+    file.write_all(text.as_bytes())?;
+    Ok((file.path().to_path_buf(), file))
+}
+
 /// Split an `$EDITOR`/`$VISUAL` command line into program + arguments.
 fn split_command(spec: &str) -> Vec<String> {
     match shell_words::split(spec) {
@@ -470,17 +483,20 @@ impl AppCommands for App {
             .or_else(|_| std::env::var("EDITOR"))
             .unwrap_or_else(|_| "nvim".to_string());
 
-        let (target_path, is_temp) = if self.fname.is_empty() {
-            let temp_dir = std::env::temp_dir();
-            let p = temp_dir.join(format!("rvs_buf_{}.s", std::process::id()));
-            let _ = std::fs::write(&p, self.editor.text());
-            (p, true)
+        let (target_path, _temp) = if self.fname.is_empty() {
+            match write_temp_buffer(&self.editor.text()) {
+                Ok((path, file)) => (path, Some(file)),
+                Err(e) => {
+                    self.status = format!("ERROR creating temp buffer: {e}");
+                    return Ok(());
+                }
+            }
         } else {
             let p = PathBuf::from(rvs_explorer::expand_tilde(&self.fname));
             if self.editor.needs_save() {
                 let _ = std::fs::write(&p, self.editor.text());
             }
-            (p, false)
+            (p, None)
         };
 
         let _ = crossterm::execute!(
@@ -531,10 +547,7 @@ impl AppCommands for App {
             }
         }
 
-        if is_temp {
-            let _ = std::fs::remove_file(target_path);
-        }
-
+        // `_temp` unlinks the temp buffer when this function returns.
         Ok(())
     }
 }
@@ -565,5 +578,24 @@ mod tests {
         assert_eq!(split_command(""), vec!["nvim"]);
         assert_eq!(split_command("   "), vec!["nvim"]);
         assert_eq!(split_command("\"unterminated"), vec!["nvim"]);
+    }
+
+    #[test]
+    fn temp_buffer_is_private_suffixed_and_cleaned_up() {
+        let text = "addi x1, x0, 1\n";
+        let (path, file) = super::write_temp_buffer(text).unwrap();
+
+        assert_eq!(path.extension().and_then(|e| e.to_str()), Some("s"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "temp buffer must not be world-readable");
+        }
+
+        drop(file);
+        assert!(!path.exists(), "temp buffer must be removed on drop");
     }
 }
