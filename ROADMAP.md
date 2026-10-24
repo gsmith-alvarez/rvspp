@@ -6,20 +6,8 @@ A plain-English breakdown of what we've built, why each feature exists, and wher
 
 ## The Backstory
 
-This project started while taking an undergraduate Computer Organization course.
+The full "why" lives in the README under "Why We Built RVS++". Short version: the 2019 Tcl/Tk RVS simulator had a proprietary dialect, clunky UI, and painful local setup, so this project rebuilt it in pure Rust with modern ergonomics and 100% autograder parity.
 
-Our labs centered around **RVS v0.46** (`RVS046.tcl`), a 2019 educational simulator written in Tcl/Tk by SIDIC. While it did an admirable job visualizing registers and memory, using it every week was an exercise in friction:
-- **Dialect lock-in**: When practicing problems or reading code online, everything used standard RISC-V pseudo-instructions (`li`, `mv`, `ret`, `call`) and GNU directives (`.word`, `.dword`). We were taught these in lecture, but RVS outright rejected them with syntax errors.
-- **Clunky UI**: The Listing and Memory views weren't real aligned tables—just manually spaced text. You were constantly wrestling with awkward horizontal scrollbars just to see what an instruction was doing.
-- **Environment headaches**: Getting RVS to run on a personal machine was like pulling teeth. It was only designed for university lab machines, and its legacy Tcl/Tk dependencies conflicted with modern systems.
-- **Missing basic editor features**: The built-in editor didn't even support standard shortcuts like `Ctrl+Backspace`.
-- **No time travel**: Stepping past a bug meant manually restarting the entire program from scratch.
-- **Silent convention penalties**: Forgetting 16-byte stack pointer alignment or accidentally clobbering callee-saved registers (`s0`–`s11`) would silently cost marks on the course autograder with zero feedback from the simulator.
-
-After wrestling with Nix to finally get RVS working locally, a question arose:
-> *Look at all the modern CLI and TUI tools developers build in Rust today. Why can't we have a simulator like that for computer architecture—one that runs anywhere without fighting your OS, has real ergonomics, and actually helps you learn?*
-
-What began as an experiment turned into **RVS++**: a complete, zero-dependency modernization that preserves 100% autograder parity while adding every tool a systems student could wish for.
 ---
 
 ## What We've Built (v1.0.0)
