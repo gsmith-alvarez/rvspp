@@ -3,7 +3,7 @@
 //!
 //! Model derived from the reference: every 64-bit cell holds a value whose
 //! Tcl rendering is `"0x" + 16 hex digits`, and the byte at address
-//! `a8 + k` is `(value >> 8k) & 0xff` — i.e. plain little-endian memory
+//! `a8 + k` is `(value >> 8k) & 0xff`, i.e. plain little-endian memory
 //! (`memr`/`memw`'s digit-index arithmetic reduces to shifts and masks).
 //! Integer loads/stores, characters and IEEE-754 doubles (`f2x`/`x2f`) all
 //! agree on that layout. Hex-digit case is preserved per byte because Tcl
@@ -420,7 +420,7 @@ impl Memory {
     }
 }
 
-/// `args2hex`: replicate the reference's digit-string packing — each
+/// `args2hex`: replicate the reference's digit-string packing: each
 /// argument's `binary format` hex is prepended, 16 zero digits are prepended
 /// when the length is not a multiple of 16, and the string is split into
 /// 16-digit doubleword groups from the end.

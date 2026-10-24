@@ -1,4 +1,4 @@
-//! rvs-tui: the `rvs` binary — CLI parsing, batch routing and the TUI.
+//! rvs-tui: the `rvs` binary: CLI parsing, batch routing and the TUI.
 
 pub mod app;
 pub mod ui;

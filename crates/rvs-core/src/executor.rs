@@ -61,7 +61,7 @@ fn read_x_arg(sim: &Simulator, arg: &str) -> SimResult<u64> {
     Ok(sim.regs.read_x(idx))
 }
 
-/// Read `::{prefix}{idx}` — the prefix comes from the argument itself, so
+/// Read `::{prefix}{idx}`: the prefix comes from the argument itself, so
 /// `f3` reads the FP register and `x3` the integer register.
 fn read_reg_arg(sim: &Simulator, arg: &str) -> SimResult<u64> {
     let idx = reg_index(arg)?;
@@ -104,7 +104,7 @@ fn imm12(arg: &str) -> SimResult<i64> {
     Ok(tcl::x12i(v as i64 as u64))
 }
 
-/// Raw immediate used by `JALR`, `FLD`, `FSD` (no sign extension — the
+/// Raw immediate used by `JALR`, `FLD`, `FSD` (no sign extension: the
 /// reference passes the hex string straight into `expr`).
 fn imm_raw(arg: &str) -> SimResult<u64> {
     let v = tcl::parse_int(arg)
@@ -688,7 +688,7 @@ fn pack_chars(s: &str) -> u64 {
     v
 }
 
-/// `ECALL` — syscalls 0-4 output, 5-9 input.
+/// `ECALL`: syscalls 0-4 output, 5-9 input.
 fn ecall(sim: &mut Simulator, args: &[String]) -> Result<bool, SimError> {
     let rs1a = read_reg_arg(sim, &args[1])?;
     let imm = imm_raw(&args[2])?;

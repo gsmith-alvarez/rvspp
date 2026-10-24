@@ -984,7 +984,7 @@ fn finish(mut e: Encoded) -> Encoded {
     e
 }
 
-/// `asm`: first pass — build `::sym` and `::mem` from the source text.
+/// `asm`: first pass: build `::sym` and `::mem` from the source text.
 /// Returns the listing (`dump`) on success.
 pub fn assemble(sim: &mut crate::Simulator, body: &str) -> Result<String, crate::AsmError> {
     sim.mem.clear();
@@ -1292,7 +1292,7 @@ fn tcl_subst(s: &str) -> String {
     out
 }
 
-/// `dump`: second pass — evaluate `DD` values, encode instructions into the
+/// `dump`: second pass: evaluate `DD` values, encode instructions into the
 /// `asmx` form used for execution, and render the listing.
 pub fn dump(sim: &mut crate::Simulator) -> String {
     let mut res = String::from("ASSEMBLY LISTING\n");

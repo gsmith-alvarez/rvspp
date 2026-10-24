@@ -865,7 +865,7 @@ fn draw_mem(f: &mut Frame, app: &mut App, area: Rect) {
 
     if data_rows_count == 0 {
         all_rows.push(Line::styled(
-            "  (no data cells — use DD/DW/DH/DB/DC/DF/DM)",
+            "  (no data cells: use DD/DW/DH/DB/DC/DF/DM)",
             Style::default().fg(Color::DarkGray),
         ));
     }
@@ -1298,7 +1298,7 @@ fn draw_modal(f: &mut Frame, app: &mut App, area: Rect) {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Double)
                 .border_style(Style::default().fg(Color::Red))
-                .title(Span::styled(" Unsaved Changes — Save Before Leaving? ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)));
+                .title(Span::styled(" Unsaved Changes: Save Before Leaving? ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)));
             let inner = block.inner(modal_area);
             f.render_widget(block, modal_area);
 
@@ -1451,7 +1451,7 @@ fn draw_modal(f: &mut Frame, app: &mut App, area: Rect) {
 
             if frames.is_empty() {
                 text.push(Line::styled(
-                    "  (no active function call frames — call a function via 'jal ra, ...' or 'call ...')",
+                    "  (no active function call frames: call a function via 'jal ra, ...' or 'call ...')",
                     Style::default().fg(Color::DarkGray),
                 ));
             } else {

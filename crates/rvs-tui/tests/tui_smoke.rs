@@ -126,7 +126,7 @@ fn test_run_vs_start_pc_semantics() {
     assert_eq!(app.sim.regs.read_x(1), 5);
     assert_eq!(app.sim.regs.read_x(2), 0);
 
-    // Press 'r' (Run) — MUST NOT reset PC! It continues from PC=4
+    // Press 'r' (Run): MUST NOT reset PC! It continues from PC=4
     app.action_run();
     assert_eq!(app.sim.regs.pc, 4);
     while app.running {
@@ -134,7 +134,7 @@ fn test_run_vs_start_pc_semantics() {
     }
     assert_eq!(app.sim.regs.read_x(2), 10);
 
-    // Press 's' (START) — MUST reset PC to 0 and run from beginning
+    // Press 's' (START): MUST reset PC to 0 and run from beginning
     app.action_start();
     assert_eq!(app.sim.regs.pc, 0);
     while app.running {

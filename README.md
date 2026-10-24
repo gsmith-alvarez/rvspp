@@ -11,24 +11,23 @@ RVS++ takes the classic 2019 educational simulator (`RVS046.tcl`) used in univer
 
 ## Why We Built RVS++
 
-If you've taken a Computer Organization course, you've probably had to use **RVS v0.46**—an educational simulator written in 2019 in Tcl/Tk.
+If you've taken a Computer Organization course, you've probably had to use **RVS v0.46** (an educational simulator written in 2019 in Tcl/Tk).
 
 The goal was simple: practice writing RISC-V assembly and get comfortable with computer architecture concepts. But actually using RVS day-to-day was frustrating:
 
 - **Can't use standard code**: When practicing problems or looking up examples online, everything uses standard RISC-V pseudo-instructions (`li`, `mv`, `ret`, `call`) and GNU directives (`.word`, `.dword`). Lectures teach you these concepts, but RVS outright rejects them with syntax errors. You're forced into a rigid, non-standard dialect (`DD`, `DW`, `DC`, raw `addi x0, ...`).
-- **Clunky UI & horizontal scrollbars**: The Listing and Memory views weren't real aligned tables—just manually spaced text. You were constantly wrestling with awkward horizontal scrollbars just to see what an instruction was doing.
+- **Clunky UI & horizontal scrollbars**: The Listing and Memory views weren't real aligned tables; they were just manually spaced text. You were constantly wrestling with awkward horizontal scrollbars just to see what an instruction was doing.
 - **Painful to run locally**: Getting RVS to run on a personal laptop is like pulling teeth. It was only designed for university lab machines, and its legacy Tcl/Tk dependencies conflict with almost every modern operating system (macOS, modern Linux distributions).
 - **Missing basic editor features**: The built-in editor didn't even support standard editing shortcuts like `Ctrl+Backspace`.
 - **Zero debugging safety nets**: Stepping past a bug meant restarting the entire program from scratch. Forgetting 16-byte stack pointer alignment or clobbering saved registers (`s0`–`s11`) would silently cost you marks on autograders with zero diagnostic feedback.
 
-After using Nix to finally wrestle RVS onto a personal machine, a thought struck:
-> *Look at all the incredible modern CLI and TUI tools developers build in Rust today. Why can't we have a simulator like that for computer architecture—one that runs anywhere without fighting your OS, has real ergonomics, and actually helps you learn?*
+After using Nix to finally wrestle RVS onto my machine, I thought of all those vibe-coded Rust tools people make. A lot of them are slop, but honestly, even that slop was better than this. So why not make a simulator that runs on modern hardware without fighting your OS, gives you decent ergonomics like Vim keys, and actually lets you work on your labs?
 
 Like C++ to C, **RVS++** takes that familiar simulator and gives it a ground-up modernization:
 
 - **Runs everywhere instantly**: Single self-contained binary in pure Rust. No Tcl, no Tk, no X11 required. Runs natively on Linux, macOS, and Windows (WSL).
 - **Feels like a real editor**: Vim modal editing (`Normal`, `Insert`, `Command`), full motion keys (`h/j/k/l`, `w/b`, `0/$`, `gg/G`), `dd`/`yy`/`p`, multi-level undo/redo, `Ctrl+Backspace` / `Ctrl+W`, and an `$EDITOR` shortcut (`Enter`) to hand off to Neovim.
-- **Proper aligned tables**: Clean tabular views with vertical dividers and correlated bitfield-to-operand color coding (`[CLR]`)—no more fighting horizontal scrollbars.
+- **Proper aligned tables**: Clean tabular views with vertical dividers and correlated bitfield-to-operand color coding (`[CLR]`), so you never have to fight horizontal scrollbars.
 - **Actual debugging tools**: Interactive breakpoints with line markers (`● `), reverse stepping (`p` to rewind time from a 128-state ring buffer), and adjustable run speeds (`1Hz` up to `Max`) with live multi-pane animation.
 - **Catches assignment bugs early**: An automated calling convention linter (`:cc`) that alerts you if `$sp` isn't 16-byte aligned or if a function modifies callee-saved registers (`s0`–`s11`) without restoring them.
 - **Call stack visualizer**: Press `[STACK]` or run `:stack` to see your active call frames, stack memory slots, return addresses, and saved registers.

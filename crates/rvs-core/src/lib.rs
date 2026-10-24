@@ -257,9 +257,9 @@ pub struct Simulator {
     pub output: String,
     /// Batch input queue (`::inl`); `None` outside batch mode.
     pub input_lines: Option<VecDeque<String>>,
-    /// `::INPprompt` — input prompt already shown for the current request.
+    /// `::INPprompt`: input prompt already shown for the current request.
     pub inp_prompt: bool,
-    /// `::EntryLabelType` — `I`/`F`/`C`/`S`/`X` while an input is pending.
+    /// `::EntryLabelType`: `I`/`F`/`C`/`S`/`X` while an input is pending.
     pub entry_type: String,
     /// Pending interactive `ECALL 5..9` request.
     pub pending: Option<executor::PendingInput>,
@@ -394,7 +394,7 @@ impl Simulator {
 /// Assembly failure carrying the reference progress text and message.
 #[derive(Debug, Clone)]
 pub struct AsmError {
-    /// `::res` — every source line consumed up to and including the failure.
+    /// `::res`: every source line consumed up to and including the failure.
     pub progress: String,
     pub message: String,
 }
