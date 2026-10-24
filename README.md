@@ -11,20 +11,55 @@ An interactive, fast terminal-based RISC-V simulator and debugger (RV64IMFD) wri
 
 RVS++ takes the classic 2019 educational simulator (`RVS046.tcl`) used in university computer architecture courses and rebuilds it for modern development: real Vim modal editing, reversible execution, live calling convention checking, call stack inspection, and zero external dependencies.
 
-<img width="1908" height="1125" alt="screenshot_20261023_222058-region" src="https://github.com/user-attachments/assets/fa067b96-4a4c-4501-a2c2-fd79ea00e767" />
+![RVS++ main view: source editor, assembly listing, registers, memory, execution trace](docs/img/overview.png)
+
+### Demo
+
+Compile, step, rewind, inspect the call stack, then run to completion with live counters:
+
+![RVS++ demo](docs/img/demo.gif)
 
 ### Listing Pane
-<img width="1898" height="1103" alt="screenshot_20261023_222112-region" src="https://github.com/user-attachments/assets/63ce30bb-47a9-40b7-a8e8-8d9c219952a7" />
+Machine code, hex/int operands and the source line, with correlated bit-field colouring:
 
+![Assembly listing pane](docs/img/listing.png)
+
+### Registers
+All 64 integer and floating-point registers, in hex, int and float views:
+
+![Register pane](docs/img/regs.png)
 
 ### Exec Pane
-<img width="950" height="1105" alt="screenshot_20261023_222127-region" src="https://github.com/user-attachments/assets/55c05bc1-a36b-4000-85b8-39bda571daad" />
+Every retired instruction with its resolved operands, plus the calling-convention linter:
 
-### Mem Pane:
-<img width="1910" height="370" alt="screenshot_20261023_222205-region" src="https://github.com/user-attachments/assets/cb4c17d9-b5bf-4f6b-9414-f3ca913e177c" />
+![Execution trace pane](docs/img/exec.png)
 
-### Transpiling:
-<img width="1904" height="1122" alt="image" src="https://github.com/user-attachments/assets/98ae92b9-0e35-49b7-a206-5bae67db977f" />
+### Mem Pane
+Sparse memory view — here, the stack frames left behind by each recursion level:
+
+![Memory pane](docs/img/mem.png)
+
+### Call Stack Visualiser
+Active frames, saved `ra`/`s0` slots and the 16-byte `$sp` alignment check:
+
+![Call stack visualiser](docs/img/stack.png)
+
+### Hardware Counters
+Cycles, CPI, branch prediction, memory traffic and instruction mix:
+
+![Hardware counters](docs/img/stats.png)
+
+### Transpiling
+Write standard GNU assembly (`.asciz`, `li`, `mv`, `ret`, `j` …):
+
+![GNU mode](docs/img/gnu.png)
+
+…then expand it to canonical RVS dialect in place with `:transpile rvs`:
+
+![Transpiled to RVS dialect](docs/img/transpile.png)
+
+<sub>Screenshots and the demo GIF are rendered from the real TUI with [VHS](https://github.com/charmbracelet/vhs); see [`docs/`](docs/) to regenerate them.</sub>
+
 
 ---
 
