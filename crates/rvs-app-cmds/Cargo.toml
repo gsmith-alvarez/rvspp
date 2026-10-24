@@ -12,3 +12,4 @@ rvs-tcl = { path = "../rvs-tcl" }
 rvs-transpile = { path = "../rvs-transpile" }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
+shell-words = { workspace = true }

@@ -27,6 +27,14 @@ pub trait AppCommands {
     ) -> Result<(), Box<dyn std::error::Error>>;
 }
 
+/// Split an `$EDITOR`/`$VISUAL` command line into program + arguments.
+fn split_command(spec: &str) -> Vec<String> {
+    match shell_words::split(spec) {
+        Ok(argv) if !argv.is_empty() => argv,
+        _ => vec!["nvim".to_string()],
+    }
+}
+
 impl AppCommands for App {
     fn on_key_command(&mut self, key: KeyEvent) {
         match key.code {
@@ -482,11 +490,13 @@ impl AppCommands for App {
         );
         let _ = crossterm::terminal::disable_raw_mode();
 
-        let mut child = std::process::Command::new(&editor_cmd)
+        let argv = split_command(&editor_cmd);
+        let mut child = std::process::Command::new(&argv[0])
+            .args(&argv[1..])
             .arg(&target_path)
             .status();
 
-        if child.is_err() && editor_cmd == "nvim" {
+        if child.is_err() && argv[0] == "nvim" {
             child = std::process::Command::new("vim")
                 .arg(&target_path)
                 .status()
@@ -502,18 +512,19 @@ impl AppCommands for App {
         let _ = terminal.clear();
 
         match child {
-            Ok(status) => {
-                if status.success() {
-                    if let Ok(new_text) = std::fs::read_to_string(&target_path) {
-                        let changed = new_text != self.editor.text();
-                        if changed {
-                            self.editor.set_text(&new_text);
-                            self.editor.modified = true;
-                            self.reset_sim_panes();
-                            self.status = "Reloaded buffer from external editor".to_string();
-                        }
+            Ok(status) if status.success() => {
+                if let Ok(new_text) = std::fs::read_to_string(&target_path) {
+                    let changed = new_text != self.editor.text();
+                    if changed {
+                        self.editor.set_text(&new_text);
+                        self.editor.modified = true;
+                        self.reset_sim_panes();
+                        self.status = "Reloaded buffer from external editor".to_string();
                     }
                 }
+            }
+            Ok(status) => {
+                self.status = format!("Editor {} exited with {status}", argv[0]);
             }
             Err(e) => {
                 self.status = format!("ERROR spawning editor {editor_cmd}: {e}");
@@ -525,5 +536,34 @@ impl AppCommands for App {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_command;
+
+    #[test]
+    fn editor_command_lines_split_like_a_shell() {
+        assert_eq!(split_command("nvim"), vec!["nvim"]);
+        assert_eq!(
+            split_command("code --wait"),
+            vec!["code".to_string(), "--wait".to_string()]
+        );
+        assert_eq!(
+            split_command("nvim -u \"my config.vim\""),
+            vec![
+                "nvim".to_string(),
+                "-u".to_string(),
+                "my config.vim".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_or_broken_command_falls_back_to_nvim() {
+        assert_eq!(split_command(""), vec!["nvim"]);
+        assert_eq!(split_command("   "), vec!["nvim"]);
+        assert_eq!(split_command("\"unterminated"), vec!["nvim"]);
     }
 }

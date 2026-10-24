@@ -18,3 +18,4 @@ rvs-format = { path = "../rvs-format" }
 rvs-editor = { path = "../rvs-editor" }
 rvs-explorer = { path = "../rvs-explorer" }
 ratatui = { workspace = true }
+shell-words = { workspace = true }

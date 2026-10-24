@@ -10,6 +10,29 @@ use rvs_executor::{step, StepResult};
 use rvs_sim::Simulator;
 use rvs_tcl as tcl;
 
+/// Parse one batch-entry line: `<asm> <in> <out> [timeout_ms]`.
+///
+/// Uses shell-style quoting so paths containing spaces work.
+fn parse_batch_entry(line: &str) -> Option<Result<(PathBuf, PathBuf, PathBuf, u64), String>> {
+    let parts = match shell_words::split(line) {
+        Ok(parts) => parts,
+        Err(e) => return Some(Err(format!("ERROR parsing batch entry: {e}"))),
+    };
+    if parts.len() < 3 {
+        return None;
+    }
+    let timeout = parts
+        .get(3)
+        .and_then(|t| t.parse::<u64>().ok())
+        .unwrap_or(3000);
+    Some(Ok((
+        PathBuf::from(&parts[0]),
+        PathBuf::from(&parts[1]),
+        PathBuf::from(&parts[2]),
+        timeout,
+    )))
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
     Normal,
@@ -688,20 +711,15 @@ impl App {
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() < 3 {
-                continue;
-            }
-            let timeout = parts
-                .get(3)
-                .and_then(|t| t.parse::<u64>().ok())
-                .unwrap_or(3000);
-            match rvs_format::run_batch_file(
-                PathBuf::from(parts[0]).as_path(),
-                PathBuf::from(parts[1]).as_path(),
-                PathBuf::from(parts[2]).as_path(),
-                timeout,
-            ) {
+            let (asm, input, out, timeout) = match parse_batch_entry(line) {
+                None => continue,
+                Some(Err(e)) => {
+                    log.push_str(&format!("#{e}\n"));
+                    continue;
+                }
+                Some(Ok(entry)) => entry,
+            };
+            match rvs_format::run_batch_file(&asm, &input, &out, timeout) {
                 Ok(()) => {}
                 Err(e) => log.push_str(&format!("#{e}\n")),
             }
@@ -826,4 +844,28 @@ impl App {
         (self.tick / 4) % 2 == 0
     }
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_batch_entry;
+    use std::path::PathBuf;
+
+    #[test]
+    fn batch_entry_supports_quoted_paths() {
+        let (asm, input, out, timeout) =
+            parse_batch_entry(r#""dir with space/a.asm" in.txt "out file.txt" 500"#)
+                .unwrap()
+                .unwrap();
+        assert_eq!(asm, PathBuf::from("dir with space/a.asm"));
+        assert_eq!(input, PathBuf::from("in.txt"));
+        assert_eq!(out, PathBuf::from("out file.txt"));
+        assert_eq!(timeout, 500);
+    }
+
+    #[test]
+    fn batch_entry_short_lines_are_skipped_and_bad_quotes_reported() {
+        assert!(parse_batch_entry("a.asm in.txt").is_none());
+        assert!(parse_batch_entry(r#""a.asm in.txt out.txt"#).unwrap().is_err());
+    }
 }

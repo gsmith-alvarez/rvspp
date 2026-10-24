@@ -284,7 +284,7 @@ The output report structure matches the original `RVS046.tcl` batch output verba
 
 ## Testing
 
-Run the full workspace test suite (53 unit, property and integration tests):
+Run the full workspace test suite (58 unit, property and integration tests):
 ```bash
 cargo test --workspace
 ```

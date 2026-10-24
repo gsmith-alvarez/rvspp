@@ -65,32 +65,47 @@ use rvs_app_cmds::AppCommands;
 use rvs_app_keys::AppKeys;
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock};
 
-static TERMINATED: AtomicBool = AtomicBool::new(false);
+static TERMINATED: LazyLock<Arc<AtomicBool>> = LazyLock::new(|| Arc::new(AtomicBool::new(false)));
 
-#[cfg(unix)]
-extern "C" fn handle_signal(_: libc::c_int) {
-    TERMINATED.store(true, Ordering::Relaxed);
+fn is_terminated() -> bool {
+    TERMINATED.load(Ordering::Relaxed)
 }
 
 #[cfg(unix)]
 pub fn setup_signal_handlers() {
-    unsafe {
-        let mut sa: libc::sigaction = std::mem::zeroed();
-        sa.sa_sigaction = handle_signal as *const () as usize;
-        libc::sigaction(libc::SIGINT, &sa, std::ptr::null_mut());
-        libc::sigaction(libc::SIGTERM, &sa, std::ptr::null_mut());
-        libc::sigaction(libc::SIGHUP, &sa, std::ptr::null_mut());
+    use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
+
+    for sig in [SIGINT, SIGTERM, SIGHUP] {
+        let _ = signal_hook::flag::register(sig, Arc::clone(&TERMINATED));
     }
 }
 
 #[cfg(not(unix))]
 pub fn setup_signal_handlers() {}
 
+#[cfg(all(test, unix))]
+mod signal_tests {
+    use super::{is_terminated, setup_signal_handlers};
+
+    #[test]
+    fn sigterm_sets_termination_flag() {
+        setup_signal_handlers();
+        assert!(!is_terminated());
+        // `raise` delivers to the calling thread; signal-hook's handler sets
+        // the shared flag instead of terminating the process.
+        unsafe {
+            libc::raise(libc::SIGTERM);
+        }
+        assert!(is_terminated());
+    }
+}
+
 #[cfg(unix)]
 fn poll_terminal_event(timeout: Duration) -> Result<bool, Box<dyn std::error::Error>> {
     use std::os::unix::io::AsRawFd;
-    if TERMINATED.load(Ordering::Relaxed) {
+    if is_terminated() {
         return Ok(false);
     }
     let fd = std::io::stdin().as_raw_fd();
@@ -120,7 +135,7 @@ fn poll_terminal_event(timeout: Duration) -> Result<bool, Box<dyn std::error::Er
 
 #[cfg(not(unix))]
 fn poll_terminal_event(timeout: Duration) -> Result<bool, Box<dyn std::error::Error>> {
-    if TERMINATED.load(Ordering::Relaxed) {
+    if is_terminated() {
         return Ok(false);
     }
     Ok(crossterm::event::poll(timeout)?)
@@ -161,7 +176,7 @@ fn event_loop(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::new(cli.args.first());
     loop {
-        if TERMINATED.load(Ordering::Relaxed) {
+        if is_terminated() {
             return Ok(());
         }
         if app.needs_full_clear {
