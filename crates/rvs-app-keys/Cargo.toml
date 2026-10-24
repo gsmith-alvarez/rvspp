@@ -1,0 +1,13 @@
+[package]
+name = "rvs-app-keys"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+rvs-app = { path = "../rvs-app" }
+rvs-app-cmds = { path = "../rvs-app-cmds" }
+rvs-editor = { path = "../rvs-editor" }
+rvs-explorer = { path = "../rvs-explorer" }
+crossterm = { workspace = true }

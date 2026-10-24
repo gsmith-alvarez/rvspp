@@ -1,0 +1,20 @@
+[package]
+name = "rvs-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+rvs-sim = { path = "../rvs-sim" }
+rvs-regs = { path = "../rvs-regs" }
+rvs-memory = { path = "../rvs-memory" }
+rvs-assembler = { path = "../rvs-assembler" }
+rvs-tcl = { path = "../rvs-tcl" }
+rvs-transpile = { path = "../rvs-transpile" }
+rvs-executor = { path = "../rvs-executor" }
+rvs-ecall = { path = "../rvs-ecall" }
+rvs-format = { path = "../rvs-format" }
+rvs-editor = { path = "../rvs-editor" }
+rvs-explorer = { path = "../rvs-explorer" }
+ratatui = { workspace = true }

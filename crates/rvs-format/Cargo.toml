@@ -1,0 +1,15 @@
+[package]
+name = "rvs-format"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+rvs-sim = { path = "../rvs-sim" }
+rvs-memory = { path = "../rvs-memory" }
+rvs-tcl = { path = "../rvs-tcl" }
+rvs-executor = { path = "../rvs-executor" }
+rvs-assembler = { path = "../rvs-assembler" }
+rvs-asm-syntax = { path = "../rvs-asm-syntax" }
+rvs-regs = { path = "../rvs-regs" }

@@ -1,0 +1,12 @@
+[package]
+name = "rvs-sim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+rvs-memory = { path = "../rvs-memory" }
+rvs-regs = { path = "../rvs-regs" }
+rvs-tcl = { path = "../rvs-tcl" }
+rvs-transpile = { path = "../rvs-transpile" }

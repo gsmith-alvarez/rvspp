@@ -1,0 +1,18 @@
+[package]
+name = "rvs-assembler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+rvs-asm-syntax = { path = "../rvs-asm-syntax" }
+rvs-sim = { path = "../rvs-sim" }
+rvs-memory = { path = "../rvs-memory" }
+rvs-regs = { path = "../rvs-regs" }
+rvs-tcl = { path = "../rvs-tcl" }
+rvs-transpile = { path = "../rvs-transpile" }
+
+[dev-dependencies]
+rvs-executor = { path = "../rvs-executor" }
+rvs-ecall = { path = "../rvs-ecall" }

@@ -13,10 +13,22 @@ path = "src/main.rs"
 [[bin]]
 name = "rvspp"
 path = "src/bin/rvspp.rs"
+
 [dependencies]
-rvs-core = { path = "../rvs-core" }
+rvs-app = { path = "../rvs-app" }
+rvs-app-keys = { path = "../rvs-app-keys" }
+rvs-ui = { path = "../rvs-ui" }
+rvs-format = { path = "../rvs-format" }
+rvs-app-cmds = { path = "../rvs-app-cmds" }
 clap = { workspace = true }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
+rvs-ui-panes = { path = "../rvs-ui-panes" }
+rvs-explorer = { path = "../rvs-explorer" }
+rvs-transpile = { path = "../rvs-transpile" }
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

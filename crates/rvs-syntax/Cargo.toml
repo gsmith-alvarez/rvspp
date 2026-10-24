@@ -1,0 +1,11 @@
+[package]
+name = "rvs-syntax"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+rvs-asm-syntax = { path = "../rvs-asm-syntax" }
+rvs-regs = { path = "../rvs-regs" }
+ratatui = { workspace = true }

@@ -1,0 +1,15 @@
+[package]
+name = "rvs-executor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+rvs-sim = { path = "../rvs-sim" }
+rvs-memory = { path = "../rvs-memory" }
+rvs-regs = { path = "../rvs-regs" }
+rvs-tcl = { path = "../rvs-tcl" }
+rvs-fpu = { path = "../rvs-fpu" }
+rvs-asm-syntax = { path = "../rvs-asm-syntax" }
+rvs-ecall = { path = "../rvs-ecall" }

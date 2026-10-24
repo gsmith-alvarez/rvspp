@@ -284,7 +284,7 @@ The output report structure matches the original `RVS046.tcl` batch output verba
 
 ## Testing
 
-Run the full workspace test suite (41 unit and integration tests):
+Run the full workspace test suite (53 unit, property and integration tests):
 ```bash
 cargo test --workspace
 ```
@@ -295,7 +295,7 @@ cargo test --workspace
 
 This project is dual-licensed and honors the educational foundation that made it possible:
 
-- **RVS++ Rust Workspace (`crates/rvs-core`, `crates/rvs-tui`)**: Released under the **MIT License**. See [LICENSE](LICENSE).
+- **RVS++ Rust Workspace (`crates/*`)**: A workspace of small, single-responsibility crates — core: `rvs-tcl`, `rvs-regs`, `rvs-memory`, `rvs-transpile`, `rvs-sim`, `rvs-asm-syntax`, `rvs-assembler`, `rvs-fpu`, `rvs-ecall`, `rvs-executor`, `rvs-format`; TUI: `rvs-editor`, `rvs-explorer`, `rvs-syntax`, `rvs-app`, `rvs-app-keys`, `rvs-app-cmds`, `rvs-ui-panes`, `rvs-ui-modal`, `rvs-ui`, `rvs-tui`. Released under the **MIT License**. See [LICENSE](LICENSE).
 - **Original Reference (`src/RVS046.tcl`)**: Copyright (c) 2019 **SIDIC**. Distributed under SIDIC's educational not-for-profit license (reproduced in full in [LICENSE](LICENSE) and within lines 321–325 of `src/RVS046.tcl`).
 
 We gratefully acknowledge SIDIC for the reference simulator and assembly specification that inspired this modernized rewrite.

@@ -1,0 +1,12 @@
+[package]
+name = "rvs-ui-modal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+rvs-app = { path = "../rvs-app" }
+rvs-ui-panes = { path = "../rvs-ui-panes" }
+rvs-explorer = { path = "../rvs-explorer" }
+ratatui = { workspace = true }

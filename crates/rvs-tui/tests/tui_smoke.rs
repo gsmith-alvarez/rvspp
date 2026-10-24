@@ -2,8 +2,10 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
 use ratatui::Terminal;
-use rvs_tui::app::{App, ConfirmAction, FileAction, Modal, Mode, Pane};
-use rvs_tui::ui;
+use rvs_app::{App, ConfirmAction, FileAction, Modal, Mode, Pane};
+use rvs_app_cmds::AppCommands as _;
+use rvs_app_keys::AppKeys as _;
+use rvs_ui as ui;
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
@@ -212,7 +214,7 @@ fn test_file_explorer_navigation_filter_and_load() {
     // Open Load modal (Ctrl+O)
     app.on_key(ctrl('o'));
     assert!(matches!(app.modal, Modal::FilePrompt(_)));
-    assert_eq!(app.explorer.mode, rvs_tui::explorer::ExplorerMode::Normal);
+    assert_eq!(app.explorer.mode, rvs_explorer::ExplorerMode::Normal);
 
     // a) Yazi Normal-mode navigation: j/k, g/G, J/K preview scroll, parent .. / h / l
     let initial_selected = app.explorer.selected;
@@ -246,7 +248,7 @@ fn test_file_explorer_navigation_filter_and_load() {
 
     // b) Switch to Filter mode ('/'), tilde ~/ resolution
     app.on_key(char_key('/'));
-    assert_eq!(app.explorer.mode, rvs_tui::explorer::ExplorerMode::Filter);
+    assert_eq!(app.explorer.mode, rvs_explorer::ExplorerMode::Filter);
     while !app.modal_input.is_empty() {
         app.on_key(key(KeyCode::Backspace));
     }
@@ -707,12 +709,12 @@ fn test_tier1_debugging_features() {
     assert!(app.status.contains("Stepped back"));
 
     // 3. Execution speed adjustments:
-    assert_eq!(app.run_speed, rvs_tui::app::RunSpeed::Max);
+    assert_eq!(app.run_speed, rvs_app::RunSpeed::Max);
     app.on_key(char_key('+'));
-    assert_eq!(app.run_speed, rvs_tui::app::RunSpeed::Hz1);
+    assert_eq!(app.run_speed, rvs_app::RunSpeed::Hz1);
     app.command_input = ":speed 20".to_string();
     app.execute_command();
-    assert_eq!(app.run_speed, rvs_tui::app::RunSpeed::Hz20);
+    assert_eq!(app.run_speed, rvs_app::RunSpeed::Hz20);
 
     // 4. Memory navigation & stack pointer jump
     app.sim.regs.write_x(2, 0x2000, false);
@@ -792,7 +794,7 @@ fn test_gnu_assembly_dialect_and_transpiler() {
     // 1. Verify GNU mode assembling standard GNU syntax & pseudo-instructions
     app.command_input = ":mode gnu".to_string();
     app.execute_command();
-    assert_eq!(app.sim.dialect, rvs_core::transpiler::AssemblyDialect::Gnu);
+    assert_eq!(app.sim.dialect, rvs_transpile::AssemblyDialect::Gnu);
 
     let gnu_source = r#"
 .globl main
@@ -857,11 +859,11 @@ helper:
     assert!(!frame.contains("Source [GNU]"));
 
     app.toggle_pane_option(Pane::Source, 1);
-    assert_eq!(app.sim.dialect, rvs_core::transpiler::AssemblyDialect::Rvs);
+    assert_eq!(app.sim.dialect, rvs_transpile::AssemblyDialect::Rvs);
     app.toggle_pane_option(Pane::Source, 2);
-    assert_eq!(app.sim.dialect, rvs_core::transpiler::AssemblyDialect::Gnu);
+    assert_eq!(app.sim.dialect, rvs_transpile::AssemblyDialect::Gnu);
     app.toggle_pane_option(Pane::Source, 3);
-    assert_eq!(app.sim.dialect, rvs_core::transpiler::AssemblyDialect::Rvs);
+    assert_eq!(app.sim.dialect, rvs_transpile::AssemblyDialect::Rvs);
 }
 
 #[test]
@@ -942,4 +944,15 @@ inner:  ebreak x0, x0, 0        # pause execution inside inner function
     // Close modal with Esc
     app.on_key(key(KeyCode::Esc));
     assert_eq!(app.modal, Modal::None);
+}
+
+#[test]
+fn test_initial_frame_snapshot() {
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = App::new(None);
+    app.editor
+        .set_text("addi x1, x0, 5\nadd x2, x1, x1\nebreak x0, x0, 0\n");
+    terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+    insta::assert_snapshot!("initial_frame", terminal.backend().to_string());
 }
