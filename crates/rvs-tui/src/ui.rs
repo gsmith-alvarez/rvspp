@@ -1040,54 +1040,56 @@ fn draw_inp(f: &mut Frame, app: &mut App, area: Rect) {
 fn draw_modal(f: &mut Frame, app: &mut App, area: Rect) {
     match &app.modal {
         Modal::About => {
-            let modal_area = centered_rect(66, 60, area);
+            let modal_area = centered_rect(80, 84, area);
             f.render_widget(Clear, modal_area);
             let block = Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Double)
                 .border_style(Style::default().fg(Color::Cyan))
-                .title(" About / Help (?) ");
+                .title(" About / Help & Command Reference (?) ");
             let inner = block.inner(modal_area);
             f.render_widget(block, modal_area);
 
             let text = vec![
                 Line::styled("RVS (RISC-V Visual Simulator) v0.5.0 [Rust Rewrite]", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Line::raw(""),
                 Line::raw("Reverse-engineered from RVS v0.46 (SIDIC, 2019) with modern Vim & Yazi workflows."),
-                Line::raw("Preserves full assembly and batch report parity with RVS046.tcl."),
                 Line::raw(""),
-                Line::styled("Keyboard Shortcuts:", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                Line::raw("  Tab / Shift+Tab  - Cycle focus between panes forward / backward"),
-                Line::raw("  Enter            - Open Source in $EDITOR; Zoom/unzoom on other panes"),
-                Line::raw("  z / :zoom        - Toggle fullscreen zoom on focused pane"),
-                Line::raw("  :                - Enter Command mode (:w, :q, :c, :s, :n, :r, etc.)"),
-                Line::raw("  h / j / k / l    - Vim cursor motion in Source; scroll in other panes"),
-                Line::raw("  w / b / 0 / $    - Word forward / backward, start / end of line"),
-                Line::raw("  gg / G           - Jump to start / end of buffer or pane"),
-                Line::raw("  i / a / I / A    - Enter INSERT mode in Source (Esc to return to NORMAL)"),
-                Line::raw("  o / O            - Insert line below / above and enter INSERT mode"),
-                Line::raw("  x / dd / yy / p  - Delete char, delete line, yank line, paste below"),
-                Line::raw("  u / Ctrl+R       - Undo / Redo in editor"),
+                Line::styled("Navigation & Modal Editing:", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Line::raw("  Tab / Shift+Tab   - Cycle focus between panes forward / backward"),
+                Line::raw("  Enter             - Source pane: open in $EDITOR; Other panes: toggle fullscreen zoom"),
+                Line::raw("  z, :zoom          - Toggle fullscreen zoom on focused pane"),
+                Line::raw("  :                 - Enter Command mode (:w, :q, :c, :s, :n, :r, :stats, :stack, etc.)"),
+                Line::raw("  h / j / k / l     - Vim cursor in Source; scroll line-by-line in other panes"),
+                Line::raw("  w / b / 0 / $     - Jump word forward / backward, beginning / end of line"),
+                Line::raw("  gg / G            - Jump to start / end of buffer or pane"),
+                Line::raw("  i / a / I / A     - Enter INSERT mode (Esc to return to NORMAL)"),
+                Line::raw("  o / O             - Insert line below / above and enter INSERT mode"),
+                Line::raw("  x / dd / yy / p   - Delete char, delete line, yank line, paste below"),
+                Line::raw("  u / Ctrl+R        - Undo / Redo in buffer"),
+                Line::raw("  Ctrl+O, :e        - Open File Explorer (Yazi-style modal)"),
+                Line::raw("  Ctrl+S, :w        - Save current buffer"),
                 Line::raw(""),
-                Line::styled("Simulation Controls (Normal Mode):", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                Line::raw("  ?                - Help / About"),
-                Line::raw("  Ctrl+O, :e       - Load file"),
-                Line::raw("  Ctrl+S, :w       - Save file"),
-                Line::raw("  c, :compile      - Compile assembly"),
-                Line::raw("  s, :start        - START (reset PC to START)"),
-                Line::raw("  n, :next         - Next / Step one instruction (or :n <count>)"),
-                Line::raw("  r, :run          - Run continuously"),
-                Line::raw("  p, P, N          - Step back / Prev (rewind 1 instruction)"),
-                Line::raw("  b, :b <addr>     - Toggle breakpoint (run stops at breakpoint)"),
-                Line::raw("  +, - ([, ])      - Adjust animation speed (1Hz, 5Hz, 20Hz, Max)"),
-                Line::raw("  s, 0 in Mem      - Jump memory view to $sp (stack) or 0x0"),
-                Line::raw("  1 / 2            - Listing pane: toggle TXT / CLR (correlated colorizing)"),
-                Line::raw("  :color [on|off]  - Toggle or set Listing correlated colorizing"),
-                Line::raw("  q, :q, :q!       - Quit simulator"),
+                Line::styled("Simulation & Advanced Debugging:", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Line::raw("  c, :compile       - Assemble source code into machine listing"),
+                Line::raw("  s, :start         - START execution (or :reset / :initpc without running)"),
+                Line::raw("  n, :n <count>     - Step 1 or <count> instructions forward"),
+                Line::raw("  p, P, N, :prev    - Step back / Reverse step (128-state history ring buffer)"),
+                Line::raw("  r, :run           - Run continuously (stops at ebreak, error, or breakpoint)"),
+                Line::raw("  x, :stop          - Stop continuous execution"),
+                Line::raw("  B in Source       - Toggle breakpoint at current cursor line (red ● marker)"),
+                Line::raw("  b in Listing      - Toggle breakpoint at current PC; :cb to clear all"),
+                Line::raw("  :b <line|addr|pc> - Toggle breakpoint at line, address, or PC"),
+                Line::raw("  +, - ([, ]), :spd - Adjust execution animation speed (1Hz, 5Hz, 20Hz, Max)"),
+                Line::raw("  :mem <sp|addr>    - Jump memory scroll to stack ($sp), 0x0, or arbitrary address"),
                 Line::raw(""),
-                Line::styled("DMA (Direct Memory Access / Memory-Mapped I/O):", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                Line::raw("  Enabled automatically when OUTC/OUTD (0x0/0x8) or INPC/INPD (0x10/0x18) labels exist."),
-                Line::raw("  Toggle active state with 'd' (or '1') when focused on OUT/INP, or by clicking the pill."),
+                Line::styled("Profiling, Conventions & Dialects:", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Line::raw("  :stats, [STATS]   - Hardware counters, estimated cycles, live CPI & branch stats"),
+                Line::raw("  :cc [on|off]      - Calling convention checker (16-byte stack, saved registers)"),
+                Line::raw("  :stack, [STACK]   - Call Stack & Stack Frame Visualizer with memory slot hierarchy"),
+                Line::raw("  :mode [gnu|rvs]   - Toggle between strict RVS dialect and standard GNU mode"),
+                Line::raw("  :transpile [mode] - In-editor two-way transpiler between GNU and RVS syntax"),
+                Line::raw("  1 / 2 in Listing  - Toggle TXT column / [CLR] correlated bitfield colorizer"),
+                Line::raw("  q, :q, :q!, ^C    - Clean exit (prompts to save only if unsaved changes exist)"),
                 Line::raw(""),
                 Line::styled("Press Esc or Enter to close.", Style::default().fg(Color::DarkGray)),
             ];
