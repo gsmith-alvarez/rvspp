@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, VecDeque};
 
-use rvs_memory::{Memory, SimError, SimResult};
+use rvs_memory::{AluOp, BranchOp, DecodedInstr, Memory, RmKind, SimError, SimResult, WKind};
 use rvs_regs::{parse_reg, RegisterFile};
 use rvs_tcl as tcl;
 
@@ -521,4 +521,233 @@ pub struct PendingInput {
     pub rs1_arg: String,
     pub imm: u64,
     pub inst_pc: u64,
+}
+
+fn decode_r(args: &[String], op: AluOp, unsigned: bool) -> Option<DecodedInstr> {
+    if args.len() < 3 {
+        return None;
+    }
+    let rd = parse_reg(&args[0])?;
+    let rs1 = parse_reg(&args[1])?;
+    let rs2 = parse_reg(&args[2])?;
+    Some(DecodedInstr::AluR {
+        rd,
+        rs1,
+        rs2,
+        op,
+        unsigned,
+    })
+}
+
+fn decode_i(args: &[String], op: AluOp, unsigned: bool) -> Option<DecodedInstr> {
+    if args.len() < 3 {
+        return None;
+    }
+    let rd = parse_reg(&args[0])?;
+    let rs1 = parse_reg(&args[1])?;
+    let imm = imm12(&args[2]).ok()?;
+    Some(DecodedInstr::AluI {
+        rd,
+        rs1,
+        imm,
+        op,
+        unsigned,
+    })
+}
+
+fn decode_branch(args: &[String], op: BranchOp, unsigned: bool) -> Option<DecodedInstr> {
+    if args.len() < 3 {
+        return None;
+    }
+    let rs1 = parse_reg(&args[0])?;
+    let rs2 = parse_reg(&args[1])?;
+    let off = imm12(&args[2]).ok()?;
+    Some(DecodedInstr::Branch {
+        rs1,
+        rs2,
+        off,
+        op,
+        unsigned,
+    })
+}
+
+fn decode_load(args: &[String], nbytes: u8, unsigned: bool) -> Option<DecodedInstr> {
+    if args.len() < 3 {
+        return None;
+    }
+    let rd = parse_reg(&args[0])?;
+    let rs1 = parse_reg(&args[1])?;
+    let offset = imm12(&args[2]).ok()?;
+    Some(DecodedInstr::Load {
+        rd,
+        rs1,
+        offset,
+        nbytes,
+        unsigned,
+    })
+}
+
+fn decode_store(args: &[String], nbytes: u8) -> Option<DecodedInstr> {
+    if args.len() < 3 {
+        return None;
+    }
+    let rs1 = parse_reg(&args[0])?;
+    let rs2 = parse_reg(&args[1])?;
+    let offset = imm12(&args[2]).ok()?;
+    Some(DecodedInstr::Store {
+        rs1,
+        rs2,
+        offset,
+        nbytes,
+    })
+}
+
+fn decode_rm(args: &[String], kind: RmKind) -> Option<DecodedInstr> {
+    if args.len() < 3 {
+        return None;
+    }
+    let rd = parse_reg(&args[0])?;
+    let rs1 = parse_reg(&args[1])?;
+    let rs2 = parse_reg(&args[2])?;
+    Some(DecodedInstr::AluRM { rd, rs1, rs2, kind })
+}
+
+fn decode_w(args: &[String], kind: WKind) -> Option<DecodedInstr> {
+    if args.len() < 3 {
+        return None;
+    }
+    let rd = parse_reg(&args[0])?;
+    let rs1 = parse_reg(&args[1])?;
+    let rs2 = parse_reg(&args[2])?;
+    Some(DecodedInstr::AluW { rd, rs1, rs2, kind })
+}
+
+fn decode_wi(args: &[String], kind: WKind) -> Option<DecodedInstr> {
+    if args.len() < 3 {
+        return None;
+    }
+    let rd = parse_reg(&args[0])?;
+    let rs1 = parse_reg(&args[1])?;
+    let imm = imm12(&args[2]).ok()?;
+    Some(DecodedInstr::AluWI { rd, rs1, imm, kind })
+}
+
+/// Pre-decode an instruction cell's opcode and operands for zero-allocation execution.
+#[must_use]
+pub fn decode_instruction(op: &str, args: &[String]) -> Option<DecodedInstr> {
+    let upper = op.to_ascii_uppercase();
+    match upper.as_str() {
+        "ADD" => decode_r(args, AluOp::Add, false),
+        "SUB" => decode_r(args, AluOp::Sub, false),
+        "AND" => decode_r(args, AluOp::And, false),
+        "OR" => decode_r(args, AluOp::Or, false),
+        "XOR" => decode_r(args, AluOp::Xor, false),
+        "SLL" => decode_r(args, AluOp::Sll, false),
+        "SRL" => decode_r(args, AluOp::Srl, true),
+        "SRA" => decode_r(args, AluOp::Sra, false),
+        "SLT" => decode_r(args, AluOp::Slt, false),
+        "SLTU" => decode_r(args, AluOp::Slt, true),
+
+        "ADDI" => decode_i(args, AluOp::Add, false),
+        "SUBI" => decode_i(args, AluOp::Sub, false),
+        "ANDI" => decode_i(args, AluOp::And, false),
+        "ORI" => decode_i(args, AluOp::Or, false),
+        "XORI" => decode_i(args, AluOp::Xor, false),
+        "SLLI" => decode_i(args, AluOp::Sll, false),
+        "SRLI" => decode_i(args, AluOp::Srl, true),
+        "SRAI" => decode_i(args, AluOp::Sra, false),
+        "SLTI" => decode_i(args, AluOp::Slt, false),
+        "SLTIU" => decode_i(args, AluOp::Slt, true),
+
+        "SD" => decode_store(args, 8),
+        "SW" => decode_store(args, 4),
+        "SH" => decode_store(args, 2),
+        "SB" => decode_store(args, 1),
+
+        "LD" => decode_load(args, 8, false),
+        "LW" => decode_load(args, 4, false),
+        "LWU" => decode_load(args, 4, true),
+        "LH" => decode_load(args, 2, false),
+        "LHU" => decode_load(args, 2, true),
+        "LB" => decode_load(args, 1, false),
+        "LBU" => decode_load(args, 1, true),
+
+        "BEQ" => decode_branch(args, BranchOp::Eq, false),
+        "BNE" => decode_branch(args, BranchOp::Ne, false),
+        "BGE" => decode_branch(args, BranchOp::Ge, false),
+        "BGEU" => decode_branch(args, BranchOp::GeU, true),
+        "BLT" => decode_branch(args, BranchOp::Lt, false),
+        "BLTU" => decode_branch(args, BranchOp::LtU, true),
+
+        "JAL" => {
+            if args.len() < 2 {
+                return None;
+            }
+            let rd = parse_reg(&args[0])?;
+            let off = imm20(&args[1]).ok()?;
+            Some(DecodedInstr::Jal { rd, off })
+        }
+        "JALR" => {
+            if args.len() < 3 {
+                return None;
+            }
+            let rd = parse_reg(&args[0])?;
+            let rs1 = parse_reg(&args[1])?;
+            let imm = imm_raw(&args[2]).ok()?;
+            Some(DecodedInstr::Jalr { rd, rs1, imm })
+        }
+        "LUI" => {
+            if args.len() < 2 {
+                return None;
+            }
+            let rd = parse_reg(&args[0])?;
+            let imm = imm20(&args[1]).ok()?;
+            Some(DecodedInstr::Lui { rd, imm })
+        }
+        "AUIPC" => {
+            if args.len() < 2 {
+                return None;
+            }
+            let rd = parse_reg(&args[0])?;
+            let imm = imm20(&args[1]).ok()?;
+            Some(DecodedInstr::Auipc { rd, imm })
+        }
+        "EBREAK" => Some(DecodedInstr::Ebreak),
+        "ECALL" => {
+            if args.len() < 3 {
+                return None;
+            }
+            let rd = parse_reg(&args[0])?;
+            let rs1 = parse_reg(&args[1])?;
+            let imm = imm_raw(&args[2]).ok()?;
+            Some(DecodedInstr::Ecall { rd, rs1, imm })
+        }
+
+        "MUL" => decode_rm(args, RmKind::Mul),
+        "MULH" => decode_rm(args, RmKind::MulH),
+        "MULHSU" => decode_rm(args, RmKind::MulHSu),
+        "MULHU" => decode_rm(args, RmKind::MulHu),
+        "DIV" => decode_rm(args, RmKind::Div),
+        "DIVU" => decode_rm(args, RmKind::DivU),
+        "REM" => decode_rm(args, RmKind::Rem),
+        "REMU" => decode_rm(args, RmKind::RemU),
+
+        "ADDIW" => decode_wi(args, WKind::Add),
+        "SLLIW" => decode_wi(args, WKind::Sll),
+        "SRLIW" => decode_wi(args, WKind::Srl),
+        "SRAIW" => decode_wi(args, WKind::Sra),
+
+        "ADDW" => decode_w(args, WKind::Add),
+        "SUBW" => decode_w(args, WKind::Sub),
+        "SLLW" => decode_w(args, WKind::Sll),
+        "SRLW" => decode_w(args, WKind::Srl),
+        "SRAW" => decode_w(args, WKind::Sra),
+        "MULW" => decode_w(args, WKind::Mul),
+        "DIVW" => decode_w(args, WKind::Div),
+        "DIVUW" => decode_w(args, WKind::DivU),
+        "REMW" => decode_w(args, WKind::Rem),
+        "REMUW" => decode_w(args, WKind::RemU),
+
+        _ => None,
+    }
 }

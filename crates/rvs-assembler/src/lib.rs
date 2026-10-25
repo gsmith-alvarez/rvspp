@@ -874,6 +874,7 @@ pub fn dump(sim: &mut Simulator) -> String {
                     if enc.error.is_none() {
                         c.op = new_op.clone();
                         c.args = new_args.clone();
+                        c.decoded = rvs_sim::decode_instruction(&c.op, &c.args);
                     }
                 }
                 res.push_str(&addr_hex);

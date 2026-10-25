@@ -13,6 +13,136 @@ use std::collections::{BTreeMap, VecDeque};
 
 use rvs_tcl as tcl;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AluOp {
+    Add,
+    Sub,
+    And,
+    Or,
+    Xor,
+    Sll,
+    Srl,
+    Sra,
+    Slt,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BranchOp {
+    Eq,
+    Ne,
+    Ge,
+    GeU,
+    Lt,
+    LtU,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WKind {
+    Add,
+    Sub,
+    Sll,
+    Srl,
+    Sra,
+    Mul,
+    Div,
+    DivU,
+    Rem,
+    RemU,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RmKind {
+    Mul,
+    MulH,
+    MulHSu,
+    MulHu,
+    Div,
+    DivU,
+    Rem,
+    RemU,
+}
+
+/// Pre-decoded representation of an instruction for zero-allocation execution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DecodedInstr {
+    AluR {
+        rd: u8,
+        rs1: u8,
+        rs2: u8,
+        op: AluOp,
+        unsigned: bool,
+    },
+    AluI {
+        rd: u8,
+        rs1: u8,
+        imm: i64,
+        op: AluOp,
+        unsigned: bool,
+    },
+    AluW {
+        rd: u8,
+        rs1: u8,
+        rs2: u8,
+        kind: WKind,
+    },
+    AluWI {
+        rd: u8,
+        rs1: u8,
+        imm: i64,
+        kind: WKind,
+    },
+    AluRM {
+        rd: u8,
+        rs1: u8,
+        rs2: u8,
+        kind: RmKind,
+    },
+    Branch {
+        rs1: u8,
+        rs2: u8,
+        off: i64,
+        op: BranchOp,
+        unsigned: bool,
+    },
+    Load {
+        rd: u8,
+        rs1: u8,
+        offset: i64,
+        nbytes: u8,
+        unsigned: bool,
+    },
+    Store {
+        rs1: u8,
+        rs2: u8,
+        offset: i64,
+        nbytes: u8,
+    },
+    Jal {
+        rd: u8,
+        off: i64,
+    },
+    Jalr {
+        rd: u8,
+        rs1: u8,
+        imm: u64,
+    },
+    Lui {
+        rd: u8,
+        imm: i64,
+    },
+    Auipc {
+        rd: u8,
+        imm: i64,
+    },
+    Ebreak,
+    Ecall {
+        rd: u8,
+        rs1: u8,
+        imm: u64,
+    },
+    Other,
+}
+
 /// One assembled instruction cell (`{op args source}` in Tcl).
 #[derive(Clone, Debug)]
 pub struct InstructionCell {
@@ -25,6 +155,7 @@ pub struct InstructionCell {
     /// Encoder diagnostic for this cell, set by `dump`. A cell with an error
     /// is never executed: the run halts and the message goes to the trace.
     pub encode_error: Option<String>,
+    pub decoded: Option<DecodedInstr>,
 }
 
 /// One memory cell.
@@ -496,6 +627,7 @@ impl Memory {
                 args,
                 source_line: source_line.to_string(),
                 encode_error: None,
+                decoded: None,
             }),
         );
     }
