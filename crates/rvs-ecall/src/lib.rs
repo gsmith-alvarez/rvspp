@@ -215,7 +215,7 @@ pub fn poll_dma_output(sim: &mut Simulator) {
             Err(e) => e.0,
         }
     } else if m01.contains('X') {
-        m11.clone()
+        m11
     } else {
         format!("WRONG CONTROL:{m01}")
     };

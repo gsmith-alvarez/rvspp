@@ -24,7 +24,8 @@ members = [
   "crates/rvs-ui-panes",
   "crates/rvs-ui-modal",
   "crates/rvs-ui",
-  "crates/rvs-tui"
+  "crates/rvs-tui",
+  "crates/repository-guards",
 ]
 
 [workspace.package]
@@ -45,3 +46,19 @@ signal-hook = "0.3"
 tempfile = "3"
 insta = "1"
 proptest = "1"
+
+[workspace.lints.clippy]
+cognitive_complexity = "warn"
+enum_glob_use = "warn"
+fn_params_excessive_bools = "warn"
+needless_for_each = "warn"
+needless_pass_by_value = "warn"
+redundant_clone = "warn"
+ref_option = "warn"
+string_add = "warn"
+undocumented_unsafe_blocks = "warn"
+unnecessary_safety_comment = "warn"
+unwrap_used = "warn"
+wildcard_imports = "warn"
+disallowed_methods = "warn"
+disallowed_macros = "warn"

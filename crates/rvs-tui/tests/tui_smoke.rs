@@ -1,3 +1,8 @@
+#![expect(
+    clippy::cognitive_complexity,
+    reason = "integration tests execute multi-step user scenarios"
+)]
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;

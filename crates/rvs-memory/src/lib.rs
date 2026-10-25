@@ -333,11 +333,11 @@ impl Memory {
                 }
                 Ok(())
             }
-            Some(_) => sim_err(format!(
+            Some(cell) => sim_err(format!(
                 "memw: #not data adr={} len={len} mem({})={}",
                 Self::addr_str(addr),
                 Self::addr_str(a8),
-                self.cells.get(&a8).unwrap().tcl_string()
+                cell.tcl_string()
             )),
             None => unreachable!(),
         }

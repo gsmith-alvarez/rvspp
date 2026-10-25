@@ -9,6 +9,10 @@ use ratatui::Frame;
 use rvs_app::{App, ConfirmAction, FileAction, Modal};
 use rvs_machine::{expand_tabs, Machine};
 
+#[expect(
+    clippy::cognitive_complexity,
+    reason = "modal renderer dispatches across all modal dialog types"
+)]
 pub fn draw_modal<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
     match &app.modal {
         Modal::About => {

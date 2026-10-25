@@ -248,6 +248,10 @@ fn draw_bottom_bar<M: Machine>(f: &mut Frame, app: &App<M>, area: Rect) {
     }
 }
 
+#[expect(
+    clippy::cognitive_complexity,
+    reason = "mouse hit-testing dispatches clicks across panes, modals, and controls"
+)]
 pub fn handle_click<M: Machine>(app: &mut App<M>, col: u16, row: u16) {
     if let Modal::FilePrompt(_) = app.modal {
         let modal_area = centered_rect(84, 82, app.last_area);

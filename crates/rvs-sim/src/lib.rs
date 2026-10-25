@@ -157,6 +157,10 @@ impl ConventionChecker {
         self.violations.clear();
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "convention checker requires call pc, target pc, caller, callee, and registers"
+    )]
     pub fn on_call(
         &mut self,
         call_pc: u64,

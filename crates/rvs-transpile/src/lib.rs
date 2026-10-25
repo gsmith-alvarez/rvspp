@@ -183,6 +183,10 @@ pub fn parse_args(args_str: &str) -> Vec<String> {
 }
 
 /// Transpiles GNU assembly source into canonical RVS dialect assembly.
+#[expect(
+    clippy::cognitive_complexity,
+    reason = "GNU dialect parser handles all directives, pseudo-ops, and instructions"
+)]
 pub fn transpile_gnu_to_rvs(source: &str) -> String {
     let mut out = String::with_capacity(source.len() + 128);
 
@@ -465,6 +469,10 @@ pub fn transpile_gnu_to_rvs(source: &str) -> String {
 }
 
 /// Transpiles canonical RVS dialect assembly into idiomatic GNU RISC-V assembly.
+#[expect(
+    clippy::cognitive_complexity,
+    reason = "RVS dialect transpiler matches all course dialect directives and forms"
+)]
 pub fn transpile_rvs_to_gnu(source: &str) -> String {
     let mut out = String::with_capacity(source.len() + 128);
 
@@ -658,6 +666,10 @@ pub fn transpile_rvs_to_gnu(source: &str) -> String {
     out
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "internal helper assembling 5 distinct line tokens into destination buffer"
+)]
 fn emit_line(out: &mut String, indent: &str, label: &str, op: &str, args: &str, comment: &str) {
     let mut l = indent.to_string();
     if !label.is_empty() {

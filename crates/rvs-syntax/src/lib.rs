@@ -197,8 +197,7 @@ fn highlight_operands_str(text: &str) -> Vec<Segment> {
     let mut spans = Vec::new();
     let mut rest = text;
 
-    while !rest.is_empty() {
-        let c = rest.chars().next().unwrap();
+    while let Some(c) = rest.chars().next() {
         let c_len = c.len_utf8();
 
         // Whitespace
@@ -546,8 +545,7 @@ fn highlight_operand_tokens_correlated(text: &str, fmt: Option<&str>) -> Vec<Seg
     let mut inside_paren = false;
     let mut rest = text;
 
-    while !rest.is_empty() {
-        let first_char = rest.chars().next().unwrap();
+    while let Some(first_char) = rest.chars().next() {
         if first_char.is_whitespace() {
             let ws_len = rest
                 .find(|c: char| !c.is_whitespace())
@@ -729,6 +727,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::cognitive_complexity,
+        reason = "test exercises multiple operand role mappings"
+    )]
     fn correlated_highlighting_maps_bitfield_roles_to_operands() {
         let semantic = |spans: &[Segment]| -> Vec<(String, Tone)> {
             spans

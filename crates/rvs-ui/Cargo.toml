@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 rvs-app = { path = "../rvs-app" }
 rvs-app-cmds = { path = "../rvs-app-cmds" }

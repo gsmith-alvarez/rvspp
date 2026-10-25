@@ -77,6 +77,10 @@ impl<M: Machine> AppCommands for App<M> {
         }
     }
 
+    #[expect(
+        clippy::cognitive_complexity,
+        reason = "command dispatcher routes all colon commands"
+    )]
     fn execute_command(&mut self) {
         // Own the text: some arms mutate `self` (and therefore `command_input`).
         let cmd_owned = self.command_input.trim().to_string();
