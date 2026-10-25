@@ -174,6 +174,10 @@ impl BatchOptions {
 }
 
 /// `kkbatch`: compile, run with timeout, and write the exact report.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "public API consumes owned options struct"
+)]
 pub fn run_batch_file(
     asm_path: &Path,
     in_path: &Path,

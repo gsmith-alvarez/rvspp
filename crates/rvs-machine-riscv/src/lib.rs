@@ -554,6 +554,10 @@ impl RiscV {
         })
     }
 
+    #[expect(
+        clippy::cognitive_complexity,
+        reason = "listing formatter handles tabs, errors, highlights, and source-tracking"
+    )]
     fn build_listing(&self, req: &ViewRequest) -> Vec<RichLine> {
         let mut lines = Vec::new();
         if self.sim.listing.is_empty() || self.sim.listing.contains("ERROR:") {
@@ -984,7 +988,7 @@ fn build_table_header(cols: &[(&str, usize)]) -> (RichLine, RichLine) {
 }
 
 /// Everything the CLI hands to a batch run.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct BatchRequest<'a> {
     /// `None` = detect from the source.
     pub dialect: Option<rvs_machine::Dialect>,

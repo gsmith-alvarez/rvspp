@@ -105,6 +105,11 @@ Patterns to follow:
 - **External editor**: split `$VISUAL`/`$EDITOR` with `shell_words`; scratch buffers go through `tempfile` (0600, `.s` suffix).
 - **Formatting**: `cargo fmt` defaults; module-level `//!` docs; explain non-obvious Tcl-compat decisions in comments.
 
+## Rust conventions
+
+Follow `/home/giovanni/.hermes/skills/rust-lint-gates/SKILL.md` for lint wiring and
+guard tests; `/home/giovanni/.hermes/skills/ai-assisted-rust/SKILL.md` for the edit loop.
+
 ## Important Files
 
 | File | Why it matters |
@@ -120,19 +125,20 @@ Patterns to follow:
 | `crates/rvs-asm-syntax/src/lib.rs` | `INSTR_TABLE`, expression evaluation |
 | `crates/rvs-app/src/lib.rs` | `App` state and simulation/file actions |
 | `crates/rvs-ui*/src/lib.rs` | Layout, panes, modals, mouse hit-testing |
+| `crates/repository-guards/` | Structural guard tests for file/crate limits, imports, and machine seam |
 | `tests/differential/run.sh` | Tcl-vs-Rust parity harness |
 | `README.md`, `ROADMAP.md`, `LICENSE` | User behavior, history, dual licensing |
 
 ## Runtime/Tooling Preferences
 
-- **Rust + Cargo only** (no Node/Bun, no npm). Edition 2021; no `rust-version`, `rust-toolchain`, `rustfmt.toml` or `clippy.toml` — tool defaults apply.
+- **Rust + Cargo only** (no Node/Bun, no npm). Edition 2021. `clippy.toml` configures lint thresholds (complexity budget 25, unwraps allowed in tests only, max 5 arguments) and bans `dbg!`/`todo!`. `[workspace.lints.clippy]` enforces style gates inherited by all member crates (`[lints] workspace = true`). Suppressions use `#[expect(lint, reason = "...")]`, never unexpiring `#[allow]`.
 - Nix is optional: `flake.nix` pins `x86_64-linux` and exposes `default` (`bin/rvs`) and `legacy` (`bin/rvs-legacy`) apps plus a dev shell with cargo/rustfmt/clippy/tcl/tk.
 - Unix-specific code is `#[cfg(unix)]` (`signal-hook`, `libc::poll`); keep non-Unix fallbacks compiling.
 - `src/RVS046.tcl` is SIDIC-licensed for educational, not-for-profit use — do not relicense it or copy its code into MIT crates.
 
 ## Testing & QA
 
-- **91 tests**: inline unit tests per crate, `proptest` properties (`rvs-editor` grapheme cursor, `rvs-tcl` integer/hex round-trips, `rvs-transpile` totality/idempotence), `rvs-assembler/tests/robustness.rs` (malformed-input corpus, error-cell contract) and `abi_a7.rs`, `rvs-machine-riscv/tests/rewind.rs` (delta snapshots vs a fresh run), 5 full-ISA integration tests, and 20 headless TUI tests (search/counts, step over/out, watchpoints, conditional breakpoints, plus an insta frame snapshot).
+- **105 tests**: 14 repository guard tests (`crates/repository-guards`) enforcing architectural invariants, inline unit tests per crate, `proptest` properties (`rvs-editor` grapheme cursor, `rvs-tcl` integer/hex round-trips, `rvs-transpile` totality/idempotence), `rvs-assembler/tests/robustness.rs` (malformed-input corpus, error-cell contract) and `abi_a7.rs`, `rvs-machine-riscv/tests/rewind.rs` (delta snapshots vs a fresh run), 5 full-ISA integration tests, and 20 headless TUI tests (search/counts, step over/out, watchpoints, conditional breakpoints, plus an insta frame snapshot).
 - **TUI tests** use `ratatui::backend::TestBackend`, `App::new(None)`, helpers `key`/`char_key`/`ctrl`/`type_str`, and assert on `app` state plus `terminal.backend().to_string()`. Render with `terminal.draw(|f| ui::draw(f, &mut app))`.
 - **Snapshot updates**: `INSTA_UPDATE=always cargo test -p rvs-tui --test tui_smoke test_initial_frame_snapshot`, then review `crates/rvs-tui/tests/snapshots/`.
 - **Parity gate**: after touching `rvs-tcl`, `rvs-asm-syntax`, `rvs-assembler`, `rvs-executor`, `rvs-fpu`, `rvs-ecall` or `rvs-format`, run `bash tests/differential/run.sh` (t1–t5, t7–t9 must diff clean; t6 is smoke-only).

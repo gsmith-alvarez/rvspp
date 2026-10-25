@@ -1,0 +1,28 @@
+# Clippy configuration for RVS++ workspace.
+# Thresholds and banned paths calibrated per rust-lint-gates skill.
+
+# Clippy warns above this cognitive-complexity score; CI promotes warnings to errors.
+cognitive-complexity-threshold = 25
+
+# Tests may panic for assertions, so unwrap_used is a production-code rule.
+allow-unwrap-in-tests = true
+
+# Functions: max 5 parameters; more than 3 bools becomes an enum or options struct.
+too-many-arguments-threshold = 5
+
+# Type and trait names are imported and used unqualified.
+absolute-paths-max-segments = 2
+
+disallowed-methods = [
+    { path = "std::panic::catch_unwind", reason = "panics are bugs; recover only as defense in depth with a reviewed `#[expect]`" },
+    { path = "std::sync::PoisonError::get_mut", reason = "a poisoned lock may hold broken invariants" },
+    { path = "std::sync::PoisonError::get_ref", reason = "a poisoned lock may hold broken invariants" },
+    { path = "std::sync::PoisonError::into_inner", reason = "a poisoned lock may hold broken invariants" },
+    { path = "std::sync::Mutex::clear_poison", reason = "a poisoned lock may hold broken invariants" },
+    { path = "std::sync::RwLock::clear_poison", reason = "a poisoned lock may hold broken invariants" },
+]
+
+disallowed-macros = [
+    { path = "std::dbg", reason = "debug scaffolding must not land" },
+    { path = "std::todo", reason = "skeletons must be finished before commit" },
+]

@@ -41,6 +41,10 @@ fn reg_or_err(arg: &str, role: &str, fp_only: bool, reject_fp: bool) -> Result<u
 }
 
 /// `instr`: encode one instruction at `pc` with `sym` for label resolution.
+#[expect(
+    clippy::cognitive_complexity,
+    reason = "instruction encoder matches all RISC-V instruction formats"
+)]
 pub fn encode(op: &str, args: &[String], pc: u64, sym: &BTreeMap<String, String>) -> Encoded {
     let desc = match find_instr(op) {
         Some(dd) => dd,
@@ -120,34 +124,32 @@ pub fn encode(op: &str, args: &[String], pc: u64, sym: &BTreeMap<String, String>
             e.asmx = vec![op.to_string(), "rd,rs1,rs2".to_string()];
             if args.len() != 3 {
                 e.error = Some("ERROR: MUST HAVE 3 ARGS".to_string());
-            } else if let Err(msg) = reg_or_err(&args[0], "rd", false, true)
-                .and_then(|rd| reg_or_err(&args[1], "rs1", false, true).map(|r1| (rd, r1)))
-                .and_then(|(rd, r1)| {
-                    reg_or_err(&args[2], "rs2", false, true).map(|r2| (rd, r1, r2))
-                })
-            {
-                e.error = Some(msg);
             } else {
-                let (rd, rs1, rs2) = (
-                    parse_reg(&args[0]).unwrap(),
-                    parse_reg(&args[1]).unwrap(),
-                    parse_reg(&args[2]).unwrap(),
-                );
-                e.asmx = vec![
-                    op.to_string(),
-                    format!("x{rd}"),
-                    format!("x{rs1}"),
-                    format!("x{rs2}"),
-                ];
-                e.bin = format!(
-                    "R  {:07b} {:05b} {:05b} {:03b} {:05b} {:07b}",
-                    desc.f7.unwrap_or(0),
-                    rs2,
-                    rs1,
-                    desc.f3.unwrap_or(0),
-                    rd,
-                    desc.opcode
-                );
+                let parsed = reg_or_err(&args[0], "rd", false, true)
+                    .and_then(|rd| reg_or_err(&args[1], "rs1", false, true).map(|r1| (rd, r1)))
+                    .and_then(|(rd, r1)| {
+                        reg_or_err(&args[2], "rs2", false, true).map(|r2| (rd, r1, r2))
+                    });
+                match parsed {
+                    Err(msg) => e.error = Some(msg),
+                    Ok((rd, rs1, rs2)) => {
+                        e.asmx = vec![
+                            op.to_string(),
+                            format!("x{rd}"),
+                            format!("x{rs1}"),
+                            format!("x{rs2}"),
+                        ];
+                        e.bin = format!(
+                            "R  {:07b} {:05b} {:05b} {:03b} {:05b} {:07b}",
+                            desc.f7.unwrap_or(0),
+                            rs2,
+                            rs1,
+                            desc.f3.unwrap_or(0),
+                            rd,
+                            desc.opcode
+                        );
+                    }
+                }
             }
         }
         InstrFmt::I => {
@@ -234,7 +236,7 @@ pub fn encode(op: &str, args: &[String], pc: u64, sym: &BTreeMap<String, String>
         InstrFmt::S | InstrFmt::Fs => {
             let is_f = desc.fmt == InstrFmt::Fs;
             let (r2role, r1role) = if is_f { ("fs2", "rs1") } else { ("rs2", "rs1") };
-            e.asmx = vec![op.to_string(), format!("{r2role},{r1role},imm").to_string()];
+            e.asmx = vec![op.to_string(), format!("{r2role},{r1role},imm")];
             if args.len() != 3 {
                 e.error = Some("ERROR: MUST HAVE 3 ARGS".to_string());
             } else {

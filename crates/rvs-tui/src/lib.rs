@@ -53,6 +53,10 @@ impl Cli {
 }
 
 /// Route: batch when `--batch` or 3+ positionals, else the TUI.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "CLI entry point consumes parsed args"
+)]
 pub fn route(cli: Cli) -> ExitCode {
     if cli.batch || cli.args.len() >= 3 {
         let mut it = cli.args.iter();
@@ -153,6 +157,7 @@ mod signal_tests {
         assert!(!is_terminated());
         // `raise` delivers to the calling thread; signal-hook's handler sets
         // the shared flag instead of terminating the process.
+        // SAFETY: `raise` with `SIGTERM` delivers to calling thread; handler sets atomic flag.
         unsafe {
             libc::raise(libc::SIGTERM);
         }
@@ -173,6 +178,7 @@ fn poll_terminal_event(timeout: Duration) -> Result<bool, Box<dyn std::error::Er
         revents: 0,
     };
     let timeout_ms = timeout.as_millis().min(i32::MAX as u128) as i32;
+    // SAFETY: `pfd` is a valid stack-allocated pollfd struct and `fd` is stdin.
     let ret = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
     if ret < 0 {
         let err = std::io::Error::last_os_error();
@@ -276,6 +282,10 @@ fn event_loop(
         }
         // One iteration is one unwind boundary: a bug in the assembler or the
         // executor must not take the user's unsaved buffer with it.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "crash containment for unsaved editor buffer"
+        )]
         let tick = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
             || -> Result<bool, LoopError> {
                 if app.needs_full_clear {
