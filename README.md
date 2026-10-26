@@ -172,6 +172,8 @@ nix develop
 | `:` | Enter Command mode (e.g. `:w`, `:q`, `:c`, `:s`, `:n`, `:r`, `:stats`, `:stack`) |
 | `?` | Open the Help / Shortcut reference modal |
 | `q` / `Ctrl+C` | Clean exit (prompts to save only if you have unsaved changes) |
+| `Ctrl+S` | Save current file |
+| `Alt+S` | Save file as (opens file explorer modal) |
 
 ### Simulation & Debugging (Normal Mode)
 | Key | Action |
@@ -315,6 +317,9 @@ Press `:` in Normal mode to enter Command mode:
 | Command | Description |
 | :--- | :--- |
 | `:w [path]` | Save current file (or Save As if untitled) |
+| `:saveas [path]` | Save current file under a new name (or open Save As explorer) |
+| `:new [path]` | Start a new empty file (prompts if unsaved changes exist) |
+| `:new!` | Force start a new empty file immediately without saving |
 | `:q` | Quit (prompts if there are unsaved changes) |
 | `:q!` | Force quit immediately without saving |
 | `:wq` / `:x` | Save and quit |

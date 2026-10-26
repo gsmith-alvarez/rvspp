@@ -96,7 +96,26 @@ impl<M: Machine> AppCommands for App<M> {
         match name {
             "q" | "quit" => self.request_quit(),
             "q!" | "quit!" => self.quit_requested = true,
-            "w" | "write" => {
+            "new" => {
+                if self.editor.needs_save() {
+                    self.modal = Modal::ConfirmSave(ConfirmAction::New);
+                    self.modal_input = self.fname.clone();
+                } else {
+                    self.new_file();
+                    if !args.is_empty() {
+                        self.fname = rvs_explorer::expand_tilde(args);
+                        self.status = format!("New file: {}", self.fname);
+                    }
+                }
+            }
+            "new!" => {
+                self.new_file();
+                if !args.is_empty() {
+                    self.fname = rvs_explorer::expand_tilde(args);
+                    self.status = format!("New file: {}", self.fname);
+                }
+            }
+            "w" | "write" | "save" => {
                 if args.is_empty() {
                     if self.fname.is_empty() {
                         self.open_modal(FileAction::SaveAs);
@@ -104,6 +123,14 @@ impl<M: Machine> AppCommands for App<M> {
                         let path = self.fname.clone();
                         self.save_file(&path);
                     }
+                } else {
+                    let path = rvs_explorer::expand_tilde(args);
+                    self.save_file(&path);
+                }
+            }
+            "saveas" | "save-as" | "sav" | "sa" => {
+                if args.is_empty() {
+                    self.open_modal(FileAction::SaveAs);
                 } else {
                     let path = rvs_explorer::expand_tilde(args);
                     self.save_file(&path);

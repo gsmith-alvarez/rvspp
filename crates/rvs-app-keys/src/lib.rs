@@ -46,8 +46,16 @@ impl<M: Machine> AppKeys for App<M> {
                 self.handle_open_action(FileAction::Load);
                 return;
             }
+            KeyCode::Char('s' | 'S') if key.modifiers.contains(KeyModifiers::ALT) => {
+                self.open_modal(FileAction::SaveAs);
+                return;
+            }
+            KeyCode::Char('S') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.open_modal(FileAction::SaveAs);
+                return;
+            }
             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if self.fname.is_empty() {
+                if key.modifiers.contains(KeyModifiers::SHIFT) || self.fname.is_empty() {
                     self.open_modal(FileAction::SaveAs);
                 } else {
                     let f = self.fname.clone();

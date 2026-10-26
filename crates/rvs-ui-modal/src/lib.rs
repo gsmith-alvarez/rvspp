@@ -50,6 +50,8 @@ pub fn draw_modal<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
                 Line::raw("  <count>motion     - Repeat a motion (3j, 4w, 5x)"),
                 Line::raw("  Ctrl+O, :e        - Open File Explorer (Yazi-style modal)"),
                 Line::raw("  Ctrl+S, :w        - Save current buffer"),
+                Line::raw("  Alt+S, :saveas    - Save current buffer under a new filename"),
+                Line::raw("  :new              - Start a new empty file"),
                 Line::raw(""),
                 Line::styled("Simulation & Advanced Debugging:", rvs_theme::INFO),
                 Line::raw("  c, :compile       - Assemble source code into machine listing"),
@@ -299,6 +301,7 @@ pub fn draw_modal<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
                 ConfirmAction::Load => "loading another file",
                 ConfirmAction::Append => "appending another file",
                 ConfirmAction::Batch => "running batch file",
+                ConfirmAction::New => "starting a new file",
             };
             let block = Block::default()
                 .borders(Borders::ALL)
