@@ -119,6 +119,7 @@ pub enum ConfirmAction {
     Load,
     Append,
     Batch,
+    New,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -938,6 +939,7 @@ impl<M: Machine> App<M> {
                 ConfirmAction::Load => self.open_modal(FileAction::Load),
                 ConfirmAction::Append => self.open_modal(FileAction::Append),
                 ConfirmAction::Batch => self.open_modal(FileAction::Batch),
+                ConfirmAction::New => self.new_file(),
             }
         }
     }
@@ -952,6 +954,7 @@ impl<M: Machine> App<M> {
                 ConfirmAction::Load => self.open_modal(FileAction::Load),
                 ConfirmAction::Append => self.open_modal(FileAction::Append),
                 ConfirmAction::Batch => self.open_modal(FileAction::Batch),
+                ConfirmAction::New => self.new_file(),
             }
         }
     }
@@ -994,6 +997,25 @@ impl<M: Machine> App<M> {
             self.modal_input = self.fname.clone();
         } else {
             self.open_modal(action);
+        }
+    }
+
+    pub fn new_file(&mut self) {
+        self.editor.set_text("");
+        self.fname.clear();
+        self.editor.modified = false;
+        self.focus = Pane::Source;
+        self.mode = Mode::Normal;
+        self.reset_sim_panes();
+        self.status = "New file".to_string();
+    }
+
+    pub fn handle_new_action(&mut self) {
+        if self.editor.needs_save() {
+            self.modal = Modal::ConfirmSave(ConfirmAction::New);
+            self.modal_input = self.fname.clone();
+        } else {
+            self.new_file();
         }
     }
 

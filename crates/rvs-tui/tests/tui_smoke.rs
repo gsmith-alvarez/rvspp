@@ -1249,3 +1249,83 @@ loop:   addi x1, x1, 1
     app.on_key(key(KeyCode::Enter));
     assert!(app.break_conditions.is_empty());
 }
+#[test]
+fn test_new_command_and_save_as() {
+    let mut app = App::<RiscV>::new(None);
+    app.fname = "existing.s".to_string();
+    app.editor.set_text("addi x1, x0, 42\n");
+    app.editor.modified = false;
+
+    // 1. :new on clean buffer creates empty buffer with empty fname
+    app.on_key(char_key(':'));
+    type_str(&mut app, "new");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(app.editor.text().trim(), "");
+    assert_eq!(app.fname, "");
+    assert_eq!(app.status, "New file");
+    assert!(!app.editor.modified);
+
+    // 2. Alt+S opens FilePrompt(FileAction::SaveAs)
+    app.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::ALT));
+    assert!(matches!(app.modal, Modal::FilePrompt(FileAction::SaveAs)));
+    app.on_key(key(KeyCode::Esc));
+    assert_eq!(app.modal, Modal::None);
+
+    // 3. :saveas opens FilePrompt(FileAction::SaveAs)
+    app.on_key(char_key(':'));
+    type_str(&mut app, "saveas");
+    app.on_key(key(KeyCode::Enter));
+    assert!(matches!(app.modal, Modal::FilePrompt(FileAction::SaveAs)));
+    app.on_key(key(KeyCode::Esc));
+
+    // 4. :saveas with path writes file and sets fname
+    let tmp_path = std::env::temp_dir()
+        .join(format!("rvs_test_saveas_{}.s", std::process::id()))
+        .to_string_lossy()
+        .to_string();
+    let _ = std::fs::remove_file(&tmp_path);
+    app.editor.set_text("addi x2, x0, 99\n");
+    app.on_key(char_key(':'));
+    type_str(&mut app, &format!("saveas {tmp_path}"));
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(app.fname, tmp_path);
+    assert!(!app.editor.modified);
+    assert_eq!(
+        std::fs::read_to_string(&tmp_path).unwrap(),
+        "addi x2, x0, 99\n"
+    );
+    let _ = std::fs::remove_file(&tmp_path);
+
+    // 5. :new on modified buffer triggers ConfirmSave(ConfirmAction::New)
+    app.editor.set_text("unsaved work\n");
+    app.editor.modified = true;
+    app.on_key(char_key(':'));
+    type_str(&mut app, "new");
+    app.on_key(key(KeyCode::Enter));
+    assert!(matches!(app.modal, Modal::ConfirmSave(ConfirmAction::New)));
+
+    // Esc cancels :new
+    app.on_key(key(KeyCode::Esc));
+    assert_eq!(app.modal, Modal::None);
+    assert_eq!(app.editor.text(), "unsaved work\n");
+
+    // Re-trigger and Ctrl+D discards
+    app.on_key(char_key(':'));
+    type_str(&mut app, "new");
+    app.on_key(key(KeyCode::Enter));
+    assert!(matches!(app.modal, Modal::ConfirmSave(ConfirmAction::New)));
+    app.on_key(ctrl('d'));
+    assert_eq!(app.modal, Modal::None);
+    assert_eq!(app.editor.text().trim(), "");
+    assert_eq!(app.fname, "");
+
+    // 6. :new! forces new file even when modified
+    app.editor.set_text("more unsaved work\n");
+    app.editor.modified = true;
+    app.on_key(char_key(':'));
+    type_str(&mut app, "new!");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(app.modal, Modal::None);
+    assert_eq!(app.editor.text().trim(), "");
+    assert_eq!(app.fname, "");
+}
