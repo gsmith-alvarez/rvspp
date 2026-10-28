@@ -27,7 +27,15 @@
         in
         {
           default = import ./shell.nix { inherit pkgs; };
+          rvs = pkgs.mkShell {
+            packages = [ self.packages.${system}.default ];
+          };
         });
+
+      overlays.default = final: prev: {
+        rvs = self.packages.${final.stdenv.hostPlatform.system}.default;
+        rvs-legacy = self.packages.${final.stdenv.hostPlatform.system}.legacy;
+      };
 
       apps = forAllSystems (system: {
         default = {

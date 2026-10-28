@@ -155,9 +155,87 @@ nix run .
 # Run with an assembly file:
 nix run . -- tests/differential/t1.asm
 
-# Enter a dev shell with all tools available:
+# Enter a dev shell with all development tools (cargo, rustc, etc.):
 nix develop
+
+# Enter a shell with rvs in PATH:
+nix develop .#rvs
 ```
+
+### Adding to a NixOS or Home Manager Configuration
+
+**With Flakes (`flake.nix`):**
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    rvspp.url = "github:gsmith-alvarez/rvspp"; # or "path:/path/to/rvspp"
+  };
+
+  outputs = { self, nixpkgs, rvspp, ... }: {
+    # NixOS:
+    nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
+      modules = [
+        {
+          environment.systemPackages = [
+            rvspp.packages.${pkgs.stdenv.hostPlatform.system}.default
+          ];
+          # Or using the overlay:
+          # nixpkgs.overlays = [ rvspp.overlays.default ];
+          # environment.systemPackages = [ pkgs.rvs ];
+        }
+      ];
+    };
+
+    # Home Manager:
+    # home.packages = [ rvspp.packages.${pkgs.stdenv.hostPlatform.system}.default ];
+  };
+}
+```
+
+**Without Flakes (`configuration.nix` / `home.nix`):**
+
+```nix
+let
+  rvs = pkgs.callPackage /path/to/rvspp/default.nix {};
+in {
+  environment.systemPackages = [ rvs ]; # or home.packages = [ rvs ];
+}
+```
+
+### Using with `direnv` in a Course / Lab Directory
+
+To automatically have `rvs` in your `$PATH` whenever you `cd` into your assembly work folder:
+
+**Option 1: 1-line `.envrc` using `nix-direnv` (no extra files):**
+```bash
+use flake github:gsmith-alvarez/rvspp#rvs
+```
+Then run `direnv allow`.
+
+**Option 2: 1-line `.envrc` using standard `direnv`:**
+```bash
+PATH_add "$(nix build github:gsmith-alvarez/rvspp#default --no-link --print-out-paths)/bin"
+```
+Then run `direnv allow`.
+
+**Option 3: With a `shell.nix` in your lab folder:**
+```nix
+# shell.nix
+{ pkgs ? import <nixpkgs> {} }:
+let
+  rvs = pkgs.callPackage /path/to/rvspp/default.nix {};
+in
+pkgs.mkShell {
+  packages = [ rvs ];
+}
+```
+And in `.envrc`:
+```bash
+use nix
+```
+Then run `direnv allow`.
 
 ---
 
