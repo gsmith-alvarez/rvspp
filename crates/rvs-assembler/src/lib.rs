@@ -605,7 +605,7 @@ pub fn assemble(sim: &mut Simulator, body: &str) -> Result<String, AsmError> {
             };
             sim.regs.pc = value as i64 as u64;
             if !label.is_empty() {
-                sim.sym.insert(label.clone(), tcl::a64(sim.regs.pc));
+                sim.sym.insert(label, tcl::a64(sim.regs.pc));
             }
             continue;
         }
@@ -619,13 +619,13 @@ pub fn assemble(sim: &mut Simulator, body: &str) -> Result<String, AsmError> {
                 Some(v) => v,
                 None => fail!("Wrong EQU value/expr (no forward labels allowed)"),
             };
-            sim.sym.insert(label.clone(), tcl::a64(value as i64 as u64));
+            sim.sym.insert(label, tcl::a64(value as i64 as u64));
             continue;
         }
         if !sim.regs.pc.is_multiple_of(4) {
             sim.regs.pc = sim.regs.pc / 4 * 4 + 4;
             if !label.is_empty() {
-                sim.sym.insert(label.clone(), tcl::a64(sim.regs.pc));
+                sim.sym.insert(label, tcl::a64(sim.regs.pc));
             }
         }
         if sim.mem.check_addr_conflict(sim.regs.pc, false) {
@@ -817,9 +817,7 @@ pub fn dump(sim: &mut Simulator) -> String {
                 expr,
                 source_line,
             }) => {
-                let raw = expr
-                    .clone()
-                    .unwrap_or_else(|| rvs_memory::render_value(value, case));
+                let raw = expr.unwrap_or_else(|| rvs_memory::render_value(value, case));
                 let (evaluated, new_value, err) = match slbl(&raw, &sim.sym) {
                     Some(v) if v >= i64::MIN as i128 && v <= u64::MAX as i128 => {
                         (format!("0x{:016x}", v as u64), v as u64, false)
@@ -872,7 +870,7 @@ pub fn dump(sim: &mut Simulator) -> String {
                             .map(|m| m.trim_start_matches("ERROR: ").to_string())
                     };
                     if enc.error.is_none() {
-                        c.op = new_op.clone();
+                        c.op = new_op;
                         c.args = new_args.clone();
                         c.decoded = rvs_sim::decode_instruction(&c.op, &c.args);
                     }
