@@ -1329,3 +1329,61 @@ fn test_new_command_and_save_as() {
     assert_eq!(app.editor.text().trim(), "");
     assert_eq!(app.fname, "");
 }
+
+#[test]
+fn test_subroutine_call_setup_set_and_test_commands() {
+    let mut app = App::<RiscV>::new(None);
+    let src = r#"
+# @test strlen32("One") == 3
+# @test strlen32("Three") == 5
+    .global strlen32
+    .text
+strlen32:
+    add  t0, x0, a0
+    addi a0, x0, 0
+loop:
+    lb   t1, 0(t0)
+    beqz t1, end
+    addi a0, a0, 1
+    addi t0, t0, 1
+    j    loop
+end:
+    ret
+"#;
+    app.editor.set_text(src);
+    app.machine.set_dialect(Dialect::Gnu);
+    app.compile();
+
+    // 1. :call runs subroutine and prints return value
+    app.command_input = ":call strlen32(\"Hello\")".to_string();
+    app.execute_command();
+    assert!(
+        app.status.contains("a0 = 5"),
+        "expected a0 = 5, got {:?}",
+        app.status
+    );
+    assert!(app.machine.sim().output.contains("strlen32() => a0 = 5"));
+
+    // 2. :call! prepares registers/PC without running, so user can step
+    app.command_input = ":call! strlen32(\"Hi\")".to_string();
+    app.execute_command();
+    assert!(app.status.contains("Ready to step strlen32()"));
+    assert_eq!(app.machine.sim().regs.read_x(2), 0x0010_0000);
+    app.action_next();
+    assert_eq!(app.machine.sim().regs.pc, 4);
+
+    // 3. :set edits a register directly
+    app.command_input = ":set a1 42".to_string();
+    app.execute_command();
+    assert_eq!(app.machine.sim().regs.read_x(11), 42);
+
+    // 4. :test runs embedded @test directives
+    app.command_input = ":test".to_string();
+    app.execute_command();
+    assert!(
+        app.status.contains("Tests: 2/2 passed"),
+        "expected 2/2 passed, got {:?}",
+        app.status
+    );
+    assert!(app.machine.sim().output.contains("PASS"));
+}

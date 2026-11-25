@@ -297,6 +297,9 @@ pub struct Simulator {
     pub exit_requested: bool,
     /// Exit status passed to the exit syscall, when any.
     pub exit_code: i64,
+    /// Optional return-sentinel PC: jumping here (e.g. via `ret` from a
+    /// directly-invoked subroutine) halts cleanly instead of faulting.
+    pub return_sentinel: Option<u64>,
 }
 
 /// First address handed out by `sbrk` in the a7 ABI (page-aligned, far away
@@ -330,6 +333,7 @@ impl Default for Simulator {
             heap_break: HEAP_BASE,
             exit_requested: false,
             exit_code: 0,
+            return_sentinel: None,
         }
     }
 }
@@ -460,7 +464,7 @@ pub fn read_x_arg(sim: &Simulator, arg: &str) -> SimResult<u64> {
 /// `f3` reads the FP register and `x3` the integer register.
 pub fn read_reg_arg(sim: &Simulator, arg: &str) -> SimResult<u64> {
     let idx = reg_index(arg)?;
-    if arg.to_ascii_lowercase().starts_with('f') {
+    if rvs_regs::is_fp_reg(arg) {
         Ok(sim.regs.read_f_bits(idx))
     } else {
         Ok(sim.regs.read_x(idx))
@@ -475,7 +479,7 @@ pub fn write_x(sim: &mut Simulator, arg: &str, val: u64, upper: bool) -> SimResu
 
 pub fn write_reg_arg(sim: &mut Simulator, arg: &str, val: u64, upper: bool) -> SimResult<()> {
     let idx = reg_index(arg)?;
-    if arg.to_ascii_lowercase().starts_with('f') {
+    if rvs_regs::is_fp_reg(arg) {
         sim.regs.write_f_bits(idx, val, upper);
     } else {
         sim.regs.write_x(idx, val, upper);
@@ -486,7 +490,7 @@ pub fn write_reg_arg(sim: &mut Simulator, arg: &str, val: u64, upper: bool) -> S
 /// The register's display string (case preserved), as Tcl would hold it.
 pub fn reg_string_of(sim: &Simulator, arg: &str) -> String {
     match parse_reg(arg) {
-        Some(idx) if arg.to_ascii_lowercase().starts_with('f') => sim.regs.f_string(idx),
+        Some(idx) if rvs_regs::is_fp_reg(arg) => sim.regs.f_string(idx),
         Some(idx) => sim.regs.x_string(idx),
         None => "0x0000000000000000".to_string(),
     }

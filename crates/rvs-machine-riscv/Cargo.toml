@@ -19,4 +19,5 @@ rvs-asm-syntax = { path = "../rvs-asm-syntax" }
 rvs-regs = { path = "../rvs-regs" }
 rvs-tcl = { path = "../rvs-tcl" }
 rvs-transpile = { path = "../rvs-transpile" }
+rvs-harness = { path = "../rvs-harness" }
 rvs-format = { path = "../rvs-format" }

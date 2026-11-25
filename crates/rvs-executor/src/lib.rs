@@ -628,6 +628,12 @@ fn execute_fast(sim: &mut Simulator, dec: DecodedInstr) -> SimResult<bool> {
 )]
 pub fn step(sim: &mut Simulator) -> StepResult {
     let inst_pc = sim.regs.pc;
+    if sim.return_sentinel == Some(inst_pc) {
+        let a0 = sim.regs.read_x(10);
+        sim.exec_log
+            .push_str(&format!("RETURN (a0 = {} / 0x{a0:x})\n", a0 as i64));
+        return StepResult::Halted;
+    }
     sim.regs.pc = inst_pc.wrapping_add(4);
 
     let (decoded, is_err) = match sim.mem.cells.get(&inst_pc) {

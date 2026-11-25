@@ -441,6 +441,21 @@ pub trait Machine: Sized {
     fn transpile(&mut self, _source: &str, _target: Dialect) -> Option<String> {
         None
     }
+
+    /// Set a named register (`a0`, `sp`, `x5`, ...) to `value`.
+    fn set_register(&mut self, _name: &str, _value: u64) -> Result<String, String> {
+        Err("register editing is not supported by this machine".to_string())
+    }
+
+    /// Prepare (and optionally execute) a subroutine call `func(args...)`.
+    fn call_function(&mut self, _spec: &str, _run: bool) -> Result<String, String> {
+        Err("subroutine calls are not supported by this machine".to_string())
+    }
+
+    /// Run `@test` directives from the current source or `extra_tests`.
+    fn run_tests(&mut self, _extra_tests: Option<&str>) -> Result<String, String> {
+        Err("test runner is not supported by this machine".to_string())
+    }
 }
 
 // ---------------------------------------------------------------------------

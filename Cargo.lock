@@ -1604,6 +1604,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rvs-harness"
+version = "1.1.0"
+dependencies = [
+ "rvs-assembler",
+ "rvs-executor",
+ "rvs-memory",
+ "rvs-regs",
+ "rvs-sim",
+ "rvs-tcl",
+ "rvs-transpile",
+]
+
+[[package]]
 name = "rvs-machine"
 version = "1.1.0"
 dependencies = [
@@ -1620,6 +1633,7 @@ dependencies = [
  "rvs-ecall",
  "rvs-executor",
  "rvs-format",
+ "rvs-harness",
  "rvs-machine",
  "rvs-memory",
  "rvs-regs",

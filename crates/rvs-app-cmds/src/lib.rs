@@ -355,6 +355,75 @@ impl<M: Machine> AppCommands for App<M> {
                 self.modal = Modal::CallStack;
                 self.needs_full_clear = true;
             }
+            "set" => {
+                let mut parts = args.split_whitespace();
+                match (parts.next(), parts.next()) {
+                    (Some(reg), Some(val_str)) => {
+                        let parsed = if let Some(neg) = val_str.strip_prefix('-') {
+                            rvs_machine::parse_u64(neg).map(|v| (-(v as i64)) as u64)
+                        } else {
+                            rvs_machine::parse_u64(val_str)
+                        };
+                        match parsed {
+                            Some(val) => match self.machine.set_register(reg, val) {
+                                Ok(msg) => {
+                                    self.status = msg;
+                                    self.needs_full_clear = true;
+                                }
+                                Err(e) => self.status = format!("ERROR: {e}"),
+                            },
+                            None => {
+                                self.status = format!("ERROR: invalid integer value \"{val_str}\"");
+                            }
+                        }
+                    }
+                    _ => self.status = "Usage: :set <reg> <value>".to_string(),
+                }
+            }
+            "call" | "call!" | "setup" => {
+                if args.is_empty() {
+                    self.status =
+                        "Usage: :call <func>(<args...>)  or  :call! <func>(<args...>)".to_string();
+                } else {
+                    if self.machine.listing_len() == 0 {
+                        self.compile();
+                    }
+                    let run_now = name == "call";
+                    self.take_reg_snapshot();
+                    match self.machine.call_function(args, run_now) {
+                        Ok(msg) => {
+                            self.mark_changed_regs();
+                            self.status = msg;
+                            self.scroll_out = 0;
+                            self.needs_full_clear = true;
+                        }
+                        Err(e) => self.status = format!("ERROR: {e}"),
+                    }
+                }
+            }
+            "test" | "tests" => {
+                self.machine.set_source(&self.editor.text());
+                let extra = if args.is_empty() {
+                    None
+                } else {
+                    let path = rvs_explorer::expand_tilde(args);
+                    match std::fs::read_to_string(&path) {
+                        Ok(text) => Some(text),
+                        Err(e) => {
+                            self.status = format!("ERROR: {e}");
+                            return;
+                        }
+                    }
+                };
+                match self.machine.run_tests(extra.as_deref()) {
+                    Ok(summary) => {
+                        self.status = summary;
+                        self.scroll_out = 0;
+                        self.needs_full_clear = true;
+                    }
+                    Err(e) => self.status = format!("ERROR: {e}"),
+                }
+            }
             other => {
                 self.status = format!("ERROR: Unknown command :{other}");
             }

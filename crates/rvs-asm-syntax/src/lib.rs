@@ -24,12 +24,18 @@ pub fn split_line(line: &str) -> Line {
     if ln.contains('#') || ln.contains(';') || ln.contains("//") {
         let orig: Vec<char> = ln.chars().collect();
         let mut q1 = false;
+        let mut q2 = false;
         for i in 0..orig.len() {
             let ch = orig[i];
-            if ch == '"' {
+            if ch == '"' && !q2 {
                 q1 = !q1;
+            } else if ch == '\'' && !q1 {
+                q2 = !q2;
             }
-            if (ch == '#' || ch == ';' || (ch == '/' && orig.get(i + 1) == Some(&'/'))) && !q1 {
+            if (ch == '#' || ch == ';' || (ch == '/' && orig.get(i + 1) == Some(&'/')))
+                && !q1
+                && !q2
+            {
                 // Tcl reassigns on every unquoted hit; later hits shrink
                 // the working string and can blank the comment.
                 cm = tcl_string_range(&ln, i as i64, i64::MAX);
@@ -84,19 +90,37 @@ pub fn fmti(op: &str, args: &[String]) -> String {
 /// `slbl`: substitute char literals and labels, then evaluate with Tcl
 /// `expr` semantics. Returns `None` on any error (Tcl's `"err"`).
 pub fn slbl(expr: &str, sym: &BTreeMap<String, String>) -> Option<i128> {
-    // 'c' -> 0x<hex>
+    // 'c' or '\n' -> 0x<hex>
     let mut s = expr.to_string();
-    while let Some(i) = s.find('\'') {
+    while let Some(byte_i) = s.find('\'') {
+        let char_i = s[..byte_i].chars().count();
         let chars: Vec<char> = s.chars().collect();
-        if chars.get(i + 2) != Some(&'\'') {
-            return None;
-        }
-        let c = chars[i + 1];
-        let hex = format!("{:02x}", c as u32);
-        let mut rebuilt: String = chars[..i].iter().collect();
+        let (ch_val, end_idx) = if chars.get(char_i + 1) == Some(&'\\') {
+            let esc = *chars.get(char_i + 2)?;
+            if chars.get(char_i + 3) != Some(&'\'') {
+                return None;
+            }
+            let v = match esc {
+                '0' => '\0',
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                '\\' => '\\',
+                '\'' => '\'',
+                other => other,
+            };
+            (v, char_i + 4)
+        } else {
+            if chars.get(char_i + 2) != Some(&'\'') {
+                return None;
+            }
+            (chars[char_i + 1], char_i + 3)
+        };
+        let hex = format!("{:02x}", ch_val as u32);
+        let mut rebuilt: String = chars[..char_i].iter().collect();
         rebuilt.push_str("0x");
         rebuilt.push_str(&hex);
-        rebuilt.extend(chars[i + 3..].iter());
+        rebuilt.extend(chars[end_idx..].iter());
         s = rebuilt;
     }
     // Space out operators exactly like the reference.
@@ -365,13 +389,34 @@ pub fn tcl_expr(text: &str) -> Option<i128> {
 /// U/UJ ops).
 pub fn normalize_args(args: &str, op: &str) -> Vec<String> {
     let trimmed = args.trim_matches(|c| c == '{' || c == '}' || c == ' ');
-    let parts: Vec<String> = trimmed
-        .split(',')
-        .map(|p| {
-            p.trim_matches(|c| c == '{' || c == '}' || c == ' ')
-                .to_string()
-        })
-        .collect();
+    let mut parts: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut in_single = false;
+    let mut escaped = false;
+    for ch in trimmed.chars() {
+        if escaped {
+            cur.push(ch);
+            escaped = false;
+        } else if ch == '\\' && in_single {
+            cur.push(ch);
+            escaped = true;
+        } else if ch == '\'' {
+            in_single = !in_single;
+            cur.push(ch);
+        } else if ch == ',' && !in_single {
+            parts.push(
+                cur.trim_matches(|c| c == '{' || c == '}' || c == ' ')
+                    .to_string(),
+            );
+            cur.clear();
+        } else {
+            cur.push(ch);
+        }
+    }
+    parts.push(
+        cur.trim_matches(|c| c == '{' || c == '}' || c == ' ')
+            .to_string(),
+    );
     let arg0 = parts.first().cloned().unwrap_or_default();
     let arg1 = parts.get(1).cloned().unwrap_or_default();
     let arg2 = parts.get(2).cloned().unwrap_or_default();

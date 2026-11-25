@@ -7,6 +7,8 @@
 //!   `not`, `neg`, `negw`, `sext.w`, `seqz`, `snez`, `sltz`, `sgtz`, `beqz`, `bnez`, `blez`, `bgez`, `bltz`, `bgtz`,
 //!   `bgt`, `ble`, `bgtu`, `bleu`, `fmv.s`, `fabs.s`, `fneg.s`, `fmv.d`, `fabs.d`, `fneg.d`.
 
+use std::collections::BTreeMap;
+
 /// Assembly dialect selector.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum AssemblyDialect {
@@ -52,6 +54,10 @@ const GNU_ONLY_DIRECTIVES: &[&str] = &[
     ".double",
     ".zero",
     ".space",
+    ".skip",
+    ".struct",
+    ".equ",
+    ".set",
     ".align",
     ".balign",
     ".p2align",
@@ -110,12 +116,16 @@ pub fn parse_line_parts(raw: &str) -> (String, String, String, String) {
     // Extract comment if present
     let mut comment_start = None;
     let mut in_quote = false;
+    let mut in_char = false;
     let chars: Vec<(usize, char)> = trimmed.char_indices().collect();
     for i in 0..chars.len() {
         let (byte_idx, ch) = chars[i];
-        if ch == '"' {
+        if ch == '"' && !in_char {
             in_quote = !in_quote;
+        } else if ch == '\'' && !in_quote {
+            in_char = !in_char;
         } else if !in_quote
+            && !in_char
             && (ch == '#'
                 || ch == ';'
                 || (ch == '/' && i + 1 < chars.len() && chars[i + 1].1 == '/'))
@@ -165,11 +175,15 @@ pub fn parse_args(args_str: &str) -> Vec<String> {
     let mut args = Vec::new();
     let mut cur = String::new();
     let mut in_quote = false;
+    let mut in_char = false;
     for ch in args_str.chars() {
-        if ch == '"' {
+        if ch == '"' && !in_char {
             in_quote = !in_quote;
             cur.push(ch);
-        } else if ch == ',' && !in_quote {
+        } else if ch == '\'' && !in_quote {
+            in_char = !in_char;
+            cur.push(ch);
+        } else if ch == ',' && !in_quote && !in_char {
             args.push(cur.trim().to_string());
             cur.clear();
         } else {
@@ -189,12 +203,22 @@ pub fn parse_args(args_str: &str) -> Vec<String> {
 )]
 pub fn transpile_gnu_to_rvs(source: &str) -> String {
     let mut out = String::with_capacity(source.len() + 128);
+    let mut struct_loc: Option<i64> = None;
+    let mut struct_syms: BTreeMap<String, i64> = BTreeMap::new();
 
     for line in source.lines() {
         let (indent, label, body, comment) = parse_line_parts(line);
 
         if body.is_empty() {
             // Line is blank, comment-only, or bare label
+            if let Some(loc) = struct_loc {
+                if !label.is_empty() {
+                    let sym_name = label.trim_end_matches(':');
+                    struct_syms.insert(sym_name.to_string(), loc);
+                    emit_line(&mut out, &indent, &label, "EQU", &loc.to_string(), &comment);
+                    continue;
+                }
+            }
             let mut l = indent;
             if !label.is_empty() {
                 l.push_str(&label);
@@ -208,6 +232,29 @@ pub fn transpile_gnu_to_rvs(source: &str) -> String {
             continue;
         }
 
+        // Symbol assignment: `sym = expr` (e.g. `sz = . - svfp`)
+        if label.is_empty() {
+            if let Some((lhs, rhs)) = split_assignment(&body) {
+                let expr = resolve_struct_expr(rhs, struct_loc, &struct_syms);
+                let val_str = match eval_simple_expr(&expr) {
+                    Some(val) => {
+                        struct_syms.insert(lhs.to_string(), val);
+                        val.to_string()
+                    }
+                    None => expr,
+                };
+                emit_line(
+                    &mut out,
+                    &indent,
+                    &format!("{lhs}:"),
+                    "EQU",
+                    &val_str,
+                    &comment,
+                );
+                continue;
+            }
+        }
+
         let (op, args_str) = split_opcode_args(&body);
         let op_lower = op.to_lowercase();
         let args = parse_args(args_str);
@@ -215,40 +262,76 @@ pub fn transpile_gnu_to_rvs(source: &str) -> String {
         // Check GNU directives
         if op.starts_with('.') {
             match op_lower.as_str() {
-                // Stripped / ignored declarations
-                ".text" | ".data" | ".rodata" | ".bss" => {
-                    let mut l = indent;
+                ".struct" => {
+                    let base = if args_str.is_empty() {
+                        0
+                    } else {
+                        let expr = resolve_struct_expr(args_str, struct_loc, &struct_syms);
+                        eval_simple_expr(&expr).unwrap_or(0)
+                    };
+                    struct_loc = Some(base);
                     if !label.is_empty() {
-                        l.push_str(&label);
-                        l.push(' ');
+                        struct_syms.insert(label.trim_end_matches(':').to_string(), base);
+                        emit_line(
+                            &mut out,
+                            &indent,
+                            &label,
+                            "EQU",
+                            &base.to_string(),
+                            &comment,
+                        );
+                    } else {
+                        emit_comment(&mut out, &indent, "", op, args_str, &comment);
                     }
-                    l.push_str(&format!("# {}", op));
-                    if !args_str.is_empty() {
-                        l.push(' ');
-                        l.push_str(args_str);
-                    }
-                    if !comment.is_empty() {
-                        l.push(' ');
-                        l.push_str(&comment);
-                    }
-                    out.push_str(&l);
-                    out.push('\n');
                     continue;
                 }
-                ".globl" | ".global" | ".file" | ".ident" | ".type" | ".size" | ".section"
-                | ".align" | ".p2align" | ".balign" | ".attribute" | ".option" => {
-                    let mut l = indent;
-                    if !label.is_empty() {
-                        l.push_str(&label);
-                        l.push(' ');
+                ".equ" | ".set" if args.len() == 2 => {
+                    let sym = args[0].trim();
+                    let expr = resolve_struct_expr(&args[1], struct_loc, &struct_syms);
+                    let rhs = match eval_simple_expr(&expr) {
+                        Some(val) => {
+                            struct_syms.insert(sym.to_string(), val);
+                            val.to_string()
+                        }
+                        None => expr,
+                    };
+                    emit_line(&mut out, &indent, &format!("{sym}:"), "EQU", &rhs, &comment);
+                    continue;
+                }
+                // Stripped / ignored declarations
+                ".text" | ".data" | ".rodata" | ".bss" | ".section" => {
+                    struct_loc = None;
+                    emit_comment(&mut out, &indent, &label, op, args_str, &comment);
+                    continue;
+                }
+                ".balign" | ".align" | ".p2align" => {
+                    if let Some(loc) = struct_loc.as_mut() {
+                        let raw = args.first().and_then(|s| parse_int_imm(s)).unwrap_or(0);
+                        let align = if op_lower == ".balign" {
+                            raw
+                        } else if (0..=16).contains(&raw) {
+                            1i64 << raw
+                        } else {
+                            0
+                        };
+                        if align > 1 {
+                            let rem = (*loc).rem_euclid(align);
+                            if rem != 0 {
+                                *loc += align - rem;
+                            }
+                        }
+                        if !label.is_empty() {
+                            struct_syms.insert(label.trim_end_matches(':').to_string(), *loc);
+                            emit_line(&mut out, &indent, &label, "EQU", &loc.to_string(), &comment);
+                            continue;
+                        }
                     }
-                    l.push_str(&format!("# {} {}", op, args_str));
-                    if !comment.is_empty() {
-                        l.push(' ');
-                        l.push_str(&comment);
-                    }
-                    out.push_str(&l);
-                    out.push('\n');
+                    emit_comment(&mut out, &indent, &label, op, args_str, &comment);
+                    continue;
+                }
+                ".globl" | ".global" | ".file" | ".ident" | ".type" | ".size" | ".attribute"
+                | ".option" => {
+                    emit_comment(&mut out, &indent, &label, op, args_str, &comment);
                     continue;
                 }
                 // Memory definitions
@@ -280,8 +363,29 @@ pub fn transpile_gnu_to_rvs(source: &str) -> String {
                     emit_line(&mut out, &indent, &label, "DC", args_str, &comment);
                     continue;
                 }
-                ".zero" | ".space" => {
-                    let n: i64 = args.first().and_then(|s| s.parse().ok()).unwrap_or(8);
+                ".zero" | ".space" | ".skip" => {
+                    let n: i64 = args
+                        .first()
+                        .and_then(|s| parse_int_imm(s))
+                        .unwrap_or(if struct_loc.is_some() { 0 } else { 8 });
+                    if let Some(loc) = struct_loc.as_mut() {
+                        let start = *loc;
+                        *loc = loc.saturating_add(n.max(0));
+                        if !label.is_empty() {
+                            struct_syms.insert(label.trim_end_matches(':').to_string(), start);
+                            emit_line(
+                                &mut out,
+                                &indent,
+                                &label,
+                                "EQU",
+                                &start.to_string(),
+                                &comment,
+                            );
+                        } else {
+                            emit_comment(&mut out, &indent, "", op, args_str, &comment);
+                        }
+                        continue;
+                    }
                     let words = (n + 7) / 8;
                     emit_line(
                         &mut out,
@@ -668,6 +772,30 @@ pub fn transpile_rvs_to_gnu(source: &str) -> String {
 
 #[expect(
     clippy::too_many_arguments,
+    reason = "internal helper assembling commented directive line tokens"
+)]
+fn emit_comment(out: &mut String, indent: &str, label: &str, op: &str, args: &str, comment: &str) {
+    let mut l = indent.to_string();
+    if !label.is_empty() {
+        l.push_str(label);
+        l.push(' ');
+    }
+    l.push_str("# ");
+    l.push_str(op);
+    if !args.is_empty() {
+        l.push(' ');
+        l.push_str(args);
+    }
+    if !comment.is_empty() {
+        l.push(' ');
+        l.push_str(comment);
+    }
+    out.push_str(&l);
+    out.push('\n');
+}
+
+#[expect(
+    clippy::too_many_arguments,
     reason = "internal helper assembling 5 distinct line tokens into destination buffer"
 )]
 fn emit_line(out: &mut String, indent: &str, label: &str, op: &str, args: &str, comment: &str) {
@@ -712,6 +840,162 @@ fn parse_int_imm(s: &str) -> Option<i64> {
     } else {
         trimmed.parse::<i64>().ok()
     }
+}
+
+fn is_valid_ident(s: &str) -> bool {
+    let mut chars = s.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Split `sym = expr` when `lhs` is a bare identifier and `=` is not part of
+/// `==`, `!=`, `<=`, or `>=`.
+fn split_assignment(body: &str) -> Option<(&str, &str)> {
+    let eq_idx = body.find('=')?;
+    let lhs = body[..eq_idx].trim();
+    let rest = &body[eq_idx + 1..];
+    if rest.starts_with('=') || lhs.ends_with(['!', '<', '>']) {
+        return None;
+    }
+    let rhs = rest.trim();
+    if is_valid_ident(lhs) && !rhs.is_empty() {
+        Some((lhs, rhs))
+    } else {
+        None
+    }
+}
+
+/// Substitute `.` (when in a `.struct` block) and known struct symbols in an
+/// expression so it can be evaluated or emitted as an `EQU` operand.
+fn resolve_struct_expr(
+    expr: &str,
+    struct_loc: Option<i64>,
+    syms: &BTreeMap<String, i64>,
+) -> String {
+    let mut out = String::with_capacity(expr.len() + 8);
+    let mut chars = expr.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '.' {
+            let next_is_ident = chars
+                .peek()
+                .map(|n| n.is_ascii_alphanumeric() || *n == '_')
+                .unwrap_or(false);
+            if !next_is_ident {
+                if let Some(loc) = struct_loc {
+                    out.push_str(&loc.to_string());
+                    continue;
+                }
+            }
+            out.push(c);
+        } else if c.is_ascii_alphabetic() || c == '_' {
+            let mut ident = String::new();
+            ident.push(c);
+            while let Some(&n) = chars.peek() {
+                if n.is_ascii_alphanumeric() || n == '_' {
+                    ident.push(n);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            if let Some(val) = syms.get(&ident) {
+                out.push_str(&val.to_string());
+            } else {
+                out.push_str(&ident);
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Evaluate a simple integer expression (`+`, `-`, `*`, `/`, unary `+/-`, parens)
+/// used in `.struct` / `.equ` / `=` assignments.
+fn eval_simple_expr(expr: &str) -> Option<i64> {
+    #[derive(Clone, Copy)]
+    enum Tok {
+        Num(i64),
+        Op(char),
+    }
+    let mut toks = Vec::new();
+    let chars: Vec<char> = expr.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c.is_whitespace() {
+            i += 1;
+        } else if matches!(c, '+' | '-' | '*' | '/' | '(' | ')') {
+            toks.push(Tok::Op(c));
+            i += 1;
+        } else if c.is_ascii_digit() {
+            let start = i;
+            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            let word: String = chars[start..i].iter().collect();
+            toks.push(Tok::Num(parse_int_imm(&word)?));
+        } else {
+            return None;
+        }
+    }
+    fn add(toks: &[Tok], p: &mut usize) -> Option<i64> {
+        let mut v = mul(toks, p)?;
+        while let Some(Tok::Op(op @ ('+' | '-'))) = toks.get(*p) {
+            *p += 1;
+            let r = mul(toks, p)?;
+            v = if *op == '+' {
+                v.checked_add(r)?
+            } else {
+                v.checked_sub(r)?
+            };
+        }
+        Some(v)
+    }
+    fn mul(toks: &[Tok], p: &mut usize) -> Option<i64> {
+        let mut v = unary(toks, p)?;
+        while let Some(Tok::Op(op @ ('*' | '/'))) = toks.get(*p) {
+            *p += 1;
+            let r = unary(toks, p)?;
+            v = if *op == '*' {
+                v.checked_mul(r)?
+            } else {
+                v.checked_div(r)?
+            };
+        }
+        Some(v)
+    }
+    fn unary(toks: &[Tok], p: &mut usize) -> Option<i64> {
+        match toks.get(*p)? {
+            Tok::Op('-') => {
+                *p += 1;
+                unary(toks, p)?.checked_neg()
+            }
+            Tok::Op('+') => {
+                *p += 1;
+                unary(toks, p)
+            }
+            Tok::Op('(') => {
+                *p += 1;
+                let v = add(toks, p)?;
+                matches!(toks.get(*p), Some(Tok::Op(')'))).then(|| {
+                    *p += 1;
+                    v
+                })
+            }
+            Tok::Num(n) => {
+                *p += 1;
+                Some(*n)
+            }
+            _ => None,
+        }
+    }
+    let mut p = 0;
+    let val = add(&toks, &mut p)?;
+    (p == toks.len()).then_some(val)
 }
 
 #[cfg(test)]
