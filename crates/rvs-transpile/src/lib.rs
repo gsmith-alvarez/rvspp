@@ -243,7 +243,14 @@ pub fn transpile_gnu_to_rvs(source: &str) -> String {
                     }
                     None => expr,
                 };
-                emit_line(&mut out, &indent, &format!("{lhs}:"), "EQU", &val_str, &comment);
+                emit_line(
+                    &mut out,
+                    &indent,
+                    &format!("{lhs}:"),
+                    "EQU",
+                    &val_str,
+                    &comment,
+                );
                 continue;
             }
         }
@@ -265,7 +272,14 @@ pub fn transpile_gnu_to_rvs(source: &str) -> String {
                     struct_loc = Some(base);
                     if !label.is_empty() {
                         struct_syms.insert(label.trim_end_matches(':').to_string(), base);
-                        emit_line(&mut out, &indent, &label, "EQU", &base.to_string(), &comment);
+                        emit_line(
+                            &mut out,
+                            &indent,
+                            &label,
+                            "EQU",
+                            &base.to_string(),
+                            &comment,
+                        );
                     } else {
                         emit_comment(&mut out, &indent, "", op, args_str, &comment);
                     }
@@ -359,14 +373,28 @@ pub fn transpile_gnu_to_rvs(source: &str) -> String {
                         *loc = loc.saturating_add(n.max(0));
                         if !label.is_empty() {
                             struct_syms.insert(label.trim_end_matches(':').to_string(), start);
-                            emit_line(&mut out, &indent, &label, "EQU", &start.to_string(), &comment);
+                            emit_line(
+                                &mut out,
+                                &indent,
+                                &label,
+                                "EQU",
+                                &start.to_string(),
+                                &comment,
+                            );
                         } else {
                             emit_comment(&mut out, &indent, "", op, args_str, &comment);
                         }
                         continue;
                     }
                     let words = (n + 7) / 8;
-                    emit_line(&mut out, &indent, &label, "DM", &words.to_string(), &comment);
+                    emit_line(
+                        &mut out,
+                        &indent,
+                        &label,
+                        "DM",
+                        &words.to_string(),
+                        &comment,
+                    );
                     continue;
                 }
                 ".org" => {
@@ -742,6 +770,10 @@ pub fn transpile_rvs_to_gnu(source: &str) -> String {
     out
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "internal helper assembling commented directive line tokens"
+)]
 fn emit_comment(out: &mut String, indent: &str, label: &str, op: &str, args: &str, comment: &str) {
     let mut l = indent.to_string();
     if !label.is_empty() {
@@ -884,7 +916,7 @@ fn resolve_struct_expr(
 /// Evaluate a simple integer expression (`+`, `-`, `*`, `/`, unary `+/-`, parens)
 /// used in `.struct` / `.equ` / `=` assignments.
 fn eval_simple_expr(expr: &str) -> Option<i64> {
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Copy)]
     enum Tok {
         Num(i64),
         Op(char),
@@ -910,69 +942,60 @@ fn eval_simple_expr(expr: &str) -> Option<i64> {
             return None;
         }
     }
-    fn parse_add(toks: &[Tok], pos: &mut usize) -> Option<i64> {
-        let mut left = parse_mul(toks, pos)?;
-        while let Some(Tok::Op(op @ ('+' | '-'))) = toks.get(*pos) {
-            let op = *op;
-            *pos += 1;
-            let right = parse_mul(toks, pos)?;
-            left = if op == '+' {
-                left.checked_add(right)?
+    fn add(toks: &[Tok], p: &mut usize) -> Option<i64> {
+        let mut v = mul(toks, p)?;
+        while let Some(Tok::Op(op @ ('+' | '-'))) = toks.get(*p) {
+            *p += 1;
+            let r = mul(toks, p)?;
+            v = if *op == '+' {
+                v.checked_add(r)?
             } else {
-                left.checked_sub(right)?
+                v.checked_sub(r)?
             };
         }
-        Some(left)
+        Some(v)
     }
-    fn parse_mul(toks: &[Tok], pos: &mut usize) -> Option<i64> {
-        let mut left = parse_unary(toks, pos)?;
-        while let Some(Tok::Op(op @ ('*' | '/'))) = toks.get(*pos) {
-            let op = *op;
-            *pos += 1;
-            let right = parse_unary(toks, pos)?;
-            left = if op == '*' {
-                left.checked_mul(right)?
+    fn mul(toks: &[Tok], p: &mut usize) -> Option<i64> {
+        let mut v = unary(toks, p)?;
+        while let Some(Tok::Op(op @ ('*' | '/'))) = toks.get(*p) {
+            *p += 1;
+            let r = unary(toks, p)?;
+            v = if *op == '*' {
+                v.checked_mul(r)?
             } else {
-                left.checked_div(right)?
+                v.checked_div(r)?
             };
         }
-        Some(left)
+        Some(v)
     }
-    fn parse_unary(toks: &[Tok], pos: &mut usize) -> Option<i64> {
-        match toks.get(*pos)? {
+    fn unary(toks: &[Tok], p: &mut usize) -> Option<i64> {
+        match toks.get(*p)? {
             Tok::Op('-') => {
-                *pos += 1;
-                parse_unary(toks, pos)?.checked_neg()
+                *p += 1;
+                unary(toks, p)?.checked_neg()
             }
             Tok::Op('+') => {
-                *pos += 1;
-                parse_unary(toks, pos)
+                *p += 1;
+                unary(toks, p)
             }
             Tok::Op('(') => {
-                *pos += 1;
-                let v = parse_add(toks, pos)?;
-                match toks.get(*pos) {
-                    Some(Tok::Op(')')) => {
-                        *pos += 1;
-                        Some(v)
-                    }
-                    _ => None,
-                }
+                *p += 1;
+                let v = add(toks, p)?;
+                matches!(toks.get(*p), Some(Tok::Op(')'))).then(|| {
+                    *p += 1;
+                    v
+                })
             }
             Tok::Num(n) => {
-                *pos += 1;
+                *p += 1;
                 Some(*n)
             }
             _ => None,
         }
     }
-    let mut pos = 0;
-    let val = parse_add(&toks, &mut pos)?;
-    if pos == toks.len() {
-        Some(val)
-    } else {
-        None
-    }
+    let mut p = 0;
+    let val = add(&toks, &mut p)?;
+    (p == toks.len()).then_some(val)
 }
 
 #[cfg(test)]

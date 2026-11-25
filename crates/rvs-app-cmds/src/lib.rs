@@ -373,8 +373,7 @@ impl<M: Machine> AppCommands for App<M> {
                                 Err(e) => self.status = format!("ERROR: {e}"),
                             },
                             None => {
-                                self.status =
-                                    format!("ERROR: invalid integer value \"{val_str}\"");
+                                self.status = format!("ERROR: invalid integer value \"{val_str}\"");
                             }
                         }
                     }
@@ -383,7 +382,8 @@ impl<M: Machine> AppCommands for App<M> {
             }
             "call" | "call!" | "setup" => {
                 if args.is_empty() {
-                    self.status = "Usage: :call <func>(<args...>)  or  :call! <func>(<args...>)".to_string();
+                    self.status =
+                        "Usage: :call <func>(<args...>)  or  :call! <func>(<args...>)".to_string();
                 } else {
                     if self.machine.listing_len() == 0 {
                         self.compile();

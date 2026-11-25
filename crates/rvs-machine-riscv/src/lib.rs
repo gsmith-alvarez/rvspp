@@ -140,7 +140,9 @@ impl Machine for RiscV {
             && self.sim.regs.read_x(1) == 0
             && self.sim.regs.read_x(2) == 0
         {
-            self.sim.regs.write_x(1, rvs_harness::RETURN_SENTINEL, false);
+            self.sim
+                .regs
+                .write_x(1, rvs_harness::RETURN_SENTINEL, false);
             self.sim.regs.write_x(2, rvs_harness::DEFAULT_SP, false);
             self.sim.return_sentinel = Some(rvs_harness::RETURN_SENTINEL);
         }
@@ -530,8 +532,8 @@ impl Machine for RiscV {
     }
 
     fn set_register(&mut self, name: &str, value: u64) -> Result<String, String> {
-        let idx = rvs_regs::parse_reg(name)
-            .ok_or_else(|| format!("unknown register \"{name}\""))?;
+        let idx =
+            rvs_regs::parse_reg(name).ok_or_else(|| format!("unknown register \"{name}\""))?;
         if rvs_regs::is_fp_reg(name) {
             self.sim.regs.write_f_bits(idx, value, false);
             Ok(format!("f{idx} = 0x{value:016x}"))

@@ -210,10 +210,7 @@ fn parse_i64_literal(s: &str) -> Option<i64> {
     tcl::parse_int(t).map(|v| v as i64)
 }
 
-fn parse_int_list<T>(
-    inner: &str,
-    conv: fn(i64) -> T,
-) -> Result<Vec<T>, String> {
+fn parse_int_list<T>(inner: &str, conv: fn(i64) -> T) -> Result<Vec<T>, String> {
     let trimmed = inner.trim();
     if trimmed.is_empty() {
         return Ok(Vec::new());
@@ -255,35 +252,25 @@ fn parse_arg(raw: &str) -> Result<CallArg, String> {
     }
     // Out-parameters: &bool, &i32, &i64, &bool(1), &i32(5), &i64(5)
     if let Some(rest) = t.strip_prefix('&') {
-        let rest = rest.trim();
-        if rest.eq_ignore_ascii_case("bool") || rest.eq_ignore_ascii_case("u8") {
-            return Ok(CallArg::OutBool(false));
-        }
-        if rest.eq_ignore_ascii_case("i32")
-            || rest.eq_ignore_ascii_case("int")
-            || rest.eq_ignore_ascii_case("int32")
-        {
-            return Ok(CallArg::OutI32(0));
-        }
-        if rest.eq_ignore_ascii_case("i64") || rest.eq_ignore_ascii_case("int64") {
-            return Ok(CallArg::OutI64(0));
-        }
-        if let Some((ty, val_part)) = rest.split_once('(') {
-            let val_str = val_part
-                .strip_suffix(')')
-                .ok_or_else(|| format!("unclosed out-param \"{t}\""))?;
-            let v = parse_i64_literal(val_str)
-                .ok_or_else(|| format!("invalid out-param initializer \"{val_str}\""))?;
-            return match ty.trim().to_ascii_lowercase().as_str() {
-                "bool" | "u8" => Ok(CallArg::OutBool(v != 0)),
-                "i32" | "int" | "int32" => Ok(CallArg::OutI32(v as i32)),
-                "i64" | "int64" => Ok(CallArg::OutI64(v)),
-                other => Err(format!("unknown out-param type \"&{other}\"")),
-            };
-        }
-        return Err(format!(
-            "unknown out-param \"{t}\" (expected &bool, &i32, or &i64)"
-        ));
+        let (ty, init) = match rest.trim().split_once('(') {
+            Some((ty, val_part)) => {
+                let s = val_part
+                    .strip_suffix(')')
+                    .ok_or_else(|| format!("unclosed out-param \"{t}\""))?;
+                let v = parse_i64_literal(s)
+                    .ok_or_else(|| format!("invalid out-param initializer \"{s}\""))?;
+                (ty.trim(), v)
+            }
+            None => (rest.trim(), 0),
+        };
+        return match ty.to_ascii_lowercase().as_str() {
+            "bool" | "u8" => Ok(CallArg::OutBool(init != 0)),
+            "i32" | "int" | "int32" => Ok(CallArg::OutI32(init as i32)),
+            "i64" | "int64" => Ok(CallArg::OutI64(init)),
+            other => Err(format!(
+                "unknown out-param \"&{other}\" (expected &bool, &i32, or &i64)"
+            )),
+        };
     }
     // Explicit 64-bit integer: 102i64 or i64(102)
     if let Some(num) = t
@@ -292,8 +279,7 @@ fn parse_arg(raw: &str) -> Result<CallArg, String> {
         .or_else(|| t.strip_suffix("u64"))
         .or_else(|| t.strip_suffix("U64"))
     {
-        let v = parse_i64_literal(num)
-            .ok_or_else(|| format!("invalid 64-bit integer \"{t}\""))?;
+        let v = parse_i64_literal(num).ok_or_else(|| format!("invalid 64-bit integer \"{t}\""))?;
         return Ok(CallArg::Int64(v));
     }
     if let Some(inner) = t
@@ -301,8 +287,8 @@ fn parse_arg(raw: &str) -> Result<CallArg, String> {
         .or_else(|| t.strip_prefix("int64("))
         .and_then(|r| r.strip_suffix(')'))
     {
-        let v = parse_i64_literal(inner)
-            .ok_or_else(|| format!("invalid 64-bit integer \"{t}\""))?;
+        let v =
+            parse_i64_literal(inner).ok_or_else(|| format!("invalid 64-bit integer \"{t}\""))?;
         return Ok(CallArg::Int64(v));
     }
     // Plain integer / char / bool
@@ -335,11 +321,7 @@ pub fn parse_call_spec(text: &str) -> Result<CallSpec, String> {
         return Err(format!("invalid function name \"{trimmed}\""));
     };
     let func = trimmed[..open].trim();
-    if func.is_empty()
-        || !func
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
+    if func.is_empty() || !func.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return Err(format!("invalid function name \"{func}\""));
     }
     let rest = trimmed[open + 1..].trim();
@@ -650,13 +632,40 @@ pub fn prepare_call(sim: &mut Simulator, spec: &CallSpec) -> Result<PreparedCall
                 slots.push(base);
             }
             CallArg::OutBool(init) => {
-                scratch = alloc_out(sim, scratch, 8, u64::from(*init), arg_idx, BufferKind::OutBool, &mut buffers, &mut slots)?;
+                scratch = alloc_out(
+                    sim,
+                    scratch,
+                    8,
+                    u64::from(*init),
+                    arg_idx,
+                    BufferKind::OutBool,
+                    &mut buffers,
+                    &mut slots,
+                )?;
             }
             CallArg::OutI32(init) => {
-                scratch = alloc_out(sim, scratch, 4, (*init as u32) as u64, arg_idx, BufferKind::OutI32, &mut buffers, &mut slots)?;
+                scratch = alloc_out(
+                    sim,
+                    scratch,
+                    4,
+                    (*init as u32) as u64,
+                    arg_idx,
+                    BufferKind::OutI32,
+                    &mut buffers,
+                    &mut slots,
+                )?;
             }
             CallArg::OutI64(init) => {
-                scratch = alloc_out(sim, scratch, 8, *init as u64, arg_idx, BufferKind::OutI64, &mut buffers, &mut slots)?;
+                scratch = alloc_out(
+                    sim,
+                    scratch,
+                    8,
+                    *init as u64,
+                    arg_idx,
+                    BufferKind::OutI64,
+                    &mut buffers,
+                    &mut slots,
+                )?;
             }
             CallArg::Symbol(name) => {
                 let addr = sim
@@ -724,6 +733,18 @@ fn alloc_out(
     Ok(base + 8)
 }
 
+fn read_i32_array(sim: &Simulator, addr: u64, len: usize) -> Vec<i32> {
+    (0..len)
+        .map(|i| sim.mem.read_bytes(addr + (i as u64) * 4, 4).unwrap_or(0) as u32 as i32)
+        .collect()
+}
+
+fn read_i64_array(sim: &Simulator, addr: u64, len: usize) -> Vec<i64> {
+    (0..len)
+        .map(|i| sim.mem.read_bytes(addr + (i as u64) * 8, 8).unwrap_or(0) as i64)
+        .collect()
+}
+
 /// Format the return value (`a0`) and any scratch buffers after a call finishes.
 pub fn format_call_result(sim: &Simulator, prepared: &PreparedCall) -> String {
     let a0 = sim.regs.read_x(10);
@@ -732,67 +753,34 @@ pub fn format_call_result(sim: &Simulator, prepared: &PreparedCall) -> String {
         prepared.func, a0 as i64
     )];
     for buf in &prepared.buffers {
-        match buf.kind {
-            BufferKind::ArrayI32(len) => {
-                let vals: Vec<String> = (0..len)
-                    .map(|i| {
-                        let raw = sim.mem.read_bytes(buf.addr + (i as u64) * 4, 4).unwrap_or(0);
-                        (raw as u32 as i32).to_string()
-                    })
-                    .collect();
-                lines.push(format!(
-                    "  arg{} ([i32; {len}] @ 0x{:x}) = [{}]",
-                    buf.arg_index,
-                    buf.addr,
-                    vals.join(", ")
-                ));
-            }
-            BufferKind::ArrayI64(len) => {
-                let vals: Vec<String> = (0..len)
-                    .map(|i| {
-                        let raw = sim.mem.read_bytes(buf.addr + (i as u64) * 8, 8).unwrap_or(0);
-                        (raw as i64).to_string()
-                    })
-                    .collect();
-                lines.push(format!(
-                    "  arg{} ([i64; {len}] @ 0x{:x}) = [{}]",
-                    buf.arg_index,
-                    buf.addr,
-                    vals.join(", ")
-                ));
-            }
-            BufferKind::CString => {
-                let s = read_cstring(sim, buf.addr);
-                lines.push(format!(
-                    "  arg{} (str @ 0x{:x}) = \"{s}\"",
-                    buf.arg_index, buf.addr
-                ));
-            }
+        let (idx, addr) = (buf.arg_index, buf.addr);
+        let detail = match buf.kind {
+            BufferKind::ArrayI32(len) => format!(
+                "([i32; {len}] @ 0x{addr:x}) = {:?}",
+                read_i32_array(sim, addr, len)
+            ),
+            BufferKind::ArrayI64(len) => format!(
+                "([i64; {len}] @ 0x{addr:x}) = {:?}",
+                read_i64_array(sim, addr, len)
+            ),
+            BufferKind::CString => format!("(str @ 0x{addr:x}) = \"{}\"", read_cstring(sim, addr)),
             BufferKind::OutBool => {
-                let b = sim.mem.read_bytes(buf.addr, 1).unwrap_or(0);
-                lines.push(format!(
-                    "  arg{} (*bool @ 0x{:x}) = {} ({})",
-                    buf.arg_index,
-                    buf.addr,
-                    b,
+                let b = sim.mem.read_bytes(addr, 1).unwrap_or(0);
+                format!(
+                    "(*bool @ 0x{addr:x}) = {b} ({})",
                     if b != 0 { "true" } else { "false" }
-                ));
+                )
             }
-            BufferKind::OutI32 => {
-                let v = sim.mem.read_bytes(buf.addr, 4).unwrap_or(0) as u32 as i32;
-                lines.push(format!(
-                    "  arg{} (*i32 @ 0x{:x}) = {v}",
-                    buf.arg_index, buf.addr
-                ));
-            }
-            BufferKind::OutI64 => {
-                let v = sim.mem.read_bytes(buf.addr, 8).unwrap_or(0) as i64;
-                lines.push(format!(
-                    "  arg{} (*i64 @ 0x{:x}) = {v}",
-                    buf.arg_index, buf.addr
-                ));
-            }
-        }
+            BufferKind::OutI32 => format!(
+                "(*i32 @ 0x{addr:x}) = {}",
+                sim.mem.read_bytes(addr, 4).unwrap_or(0) as u32 as i32
+            ),
+            BufferKind::OutI64 => format!(
+                "(*i64 @ 0x{addr:x}) = {}",
+                sim.mem.read_bytes(addr, 8).unwrap_or(0) as i64
+            ),
+        };
+        lines.push(format!("  arg{idx} {detail}"));
     }
     lines.join("\n")
 }
@@ -804,8 +792,7 @@ pub fn run_single_call(
     timeout_ms: u64,
 ) -> Result<String, String> {
     let prepared = prepare_call(sim, spec)?;
-    sim.exec_log
-        .push_str(&format!("CALL {}()\n", spec.func));
+    sim.exec_log.push_str(&format!("CALL {}()\n", spec.func));
     let status = rvs_executor::run(sim, timeout_ms);
     if status == rvs_executor::RunStatus::TimedOut {
         return Err(format!("{}() timed out after {timeout_ms}ms", spec.func));
@@ -860,7 +847,11 @@ fn check_assertion(
                 return Err(format!("arg{idx} is not an i32 array"));
             };
             let actual: Vec<i32> = (0..len)
-                .map(|i| sim.mem.read_bytes(buf.addr + (i as u64) * 4, 4).unwrap_or(0) as u32 as i32)
+                .map(|i| {
+                    sim.mem
+                        .read_bytes(buf.addr + (i as u64) * 4, 4)
+                        .unwrap_or(0) as u32 as i32
+                })
                 .collect();
             if &actual == expected {
                 Ok(())
@@ -878,7 +869,11 @@ fn check_assertion(
                 return Err(format!("arg{idx} is not an i64 array"));
             };
             let actual: Vec<i64> = (0..len)
-                .map(|i| sim.mem.read_bytes(buf.addr + (i as u64) * 8, 8).unwrap_or(0) as i64)
+                .map(|i| {
+                    sim.mem
+                        .read_bytes(buf.addr + (i as u64) * 8, 8)
+                        .unwrap_or(0) as i64
+                })
                 .collect();
             if &actual == expected {
                 Ok(())
@@ -931,7 +926,13 @@ pub fn run_test_suite(
             failed += 1;
             formatted.push_str(&format!("FAIL [L{line}] {raw} -> {detail}\n"));
         }
-        results.push(TestCaseOutcome { line, raw, passed: ok, detail, steps });
+        results.push(TestCaseOutcome {
+            line,
+            raw,
+            passed: ok,
+            detail,
+            steps,
+        });
     };
 
     for entry in parsed {
