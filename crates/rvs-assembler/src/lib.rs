@@ -28,7 +28,7 @@ fn reg_or_err(arg: &str, role: &str, fp_only: bool, reject_fp: bool) -> Result<u
     match parse_reg(arg) {
         None => Err(format!("ERROR: {role} NOT A REGISTER")),
         Some(idx) => {
-            let is_f = arg.to_ascii_lowercase().starts_with('f');
+            let is_f = rvs_regs::is_fp_reg(arg);
             if fp_only && !is_f {
                 Err(format!("ERROR: {role} NOT AN FP REGISTER"))
             } else if reject_fp && is_f {
@@ -166,12 +166,12 @@ pub fn encode(op: &str, args: &[String], pc: u64, sym: &BTreeMap<String, String>
                         if let Err(m) = imm12_ok(imm) {
                             e.error = Some(m);
                         } else {
-                            let rdxp = if args[0].to_ascii_lowercase().starts_with('f') {
+                            let rdxp = if rvs_regs::is_fp_reg(&args[0]) {
                                 "f"
                             } else {
                                 "x"
                             };
-                            let rs1xp = if args[1].to_ascii_lowercase().starts_with('f') {
+                            let rs1xp = if rvs_regs::is_fp_reg(&args[1]) {
                                 "f"
                             } else {
                                 "x"

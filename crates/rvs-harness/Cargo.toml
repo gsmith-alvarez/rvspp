@@ -1,0 +1,18 @@
+[package]
+name = "rvs-harness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+rvs-assembler = { path = "../rvs-assembler" }
+rvs-executor = { path = "../rvs-executor" }
+rvs-memory = { path = "../rvs-memory" }
+rvs-regs = { path = "../rvs-regs" }
+rvs-sim = { path = "../rvs-sim" }
+rvs-tcl = { path = "../rvs-tcl" }
+rvs-transpile = { path = "../rvs-transpile" }
+
+[lints]
+workspace = true

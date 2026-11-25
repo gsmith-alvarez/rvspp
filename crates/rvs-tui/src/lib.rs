@@ -39,6 +39,18 @@ pub struct Cli {
     /// Syscall convention: rvs (default, course dialect) or a7 (RARS/GNU)
     #[arg(long, default_value = "rvs", value_parser = ["rvs", "a7"])]
     pub abi: String,
+
+    /// Run `# @test ...` directives in <asm_file> and print a pass/fail summary
+    #[arg(long)]
+    pub test: bool,
+
+    /// External test driver file containing `@test` directives (used with --test)
+    #[arg(long, value_name = "PATH")]
+    pub tests: Option<PathBuf>,
+
+    /// Call a single subroutine from <asm_file>, e.g. --call 'reverse([10,34,21,8,50], 20)'
+    #[arg(long, value_name = "EXPR")]
+    pub call: Option<String>,
 }
 
 impl Cli {
@@ -58,6 +70,47 @@ impl Cli {
     reason = "CLI entry point consumes parsed args"
 )]
 pub fn route(cli: Cli) -> ExitCode {
+    if cli.test || cli.tests.is_some() {
+        let Some(asm) = cli.args.first().map(PathBuf::from) else {
+            eprintln!("--test requires an assembly file: rvs --test <asm_file>");
+            return ExitCode::FAILURE;
+        };
+        return match rvs_machine_riscv::run_cli_tests(
+            &asm,
+            cli.tests.as_deref(),
+            cli.dialect(),
+            cli.timeout,
+        ) {
+            Ok((_, failed, formatted)) => {
+                print!("{formatted}");
+                if failed == 0 {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::FAILURE
+                }
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if let Some(expr) = &cli.call {
+        let Some(asm) = cli.args.first().map(PathBuf::from) else {
+            eprintln!("--call requires an assembly file: rvs --call 'func(...)' <asm_file>");
+            return ExitCode::FAILURE;
+        };
+        return match rvs_machine_riscv::run_cli_call(&asm, expr, cli.dialect(), cli.timeout) {
+            Ok(summary) => {
+                println!("{summary}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     if cli.batch || cli.args.len() >= 3 {
         let mut it = cli.args.iter();
         let asm = it.next().map(PathBuf::from);

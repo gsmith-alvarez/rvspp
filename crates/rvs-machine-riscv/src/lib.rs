@@ -136,6 +136,14 @@ impl Machine for RiscV {
 
     fn start(&mut self) {
         self.reset_pc();
+        if self.sim.dialect == rvs_transpile::AssemblyDialect::Gnu
+            && self.sim.regs.read_x(1) == 0
+            && self.sim.regs.read_x(2) == 0
+        {
+            self.sim.regs.write_x(1, rvs_harness::RETURN_SENTINEL, false);
+            self.sim.regs.write_x(2, rvs_harness::DEFAULT_SP, false);
+            self.sim.return_sentinel = Some(rvs_harness::RETURN_SENTINEL);
+        }
         self.sim.exec_log.push_str("START\n");
         self.sim.inp_prompt = false;
         self.sim.convention.reset();
@@ -519,6 +527,65 @@ impl Machine for RiscV {
             Dialect::Gnu => rvs_transpile::transpile_rvs_to_gnu(source),
             Dialect::Rvs => rvs_transpile::transpile_gnu_to_rvs(source),
         })
+    }
+
+    fn set_register(&mut self, name: &str, value: u64) -> Result<String, String> {
+        let idx = rvs_regs::parse_reg(name)
+            .ok_or_else(|| format!("unknown register \"{name}\""))?;
+        if rvs_regs::is_fp_reg(name) {
+            self.sim.regs.write_f_bits(idx, value, false);
+            Ok(format!("f{idx} = 0x{value:016x}"))
+        } else {
+            self.sim.regs.write_x(idx, value, false);
+            Ok(format!(
+                "x{idx} ({}) = {} (0x{value:x})",
+                rvs_regs::abi_name(idx),
+                value as i64
+            ))
+        }
+    }
+
+    fn call_function(&mut self, spec_text: &str, run: bool) -> Result<String, String> {
+        let spec = rvs_harness::parse_call_spec(spec_text)?;
+        if run {
+            let summary = rvs_harness::run_single_call(&mut self.sim, &spec, 3000)?;
+            self.sim.output.push_str(&summary);
+            self.sim.output.push('\n');
+            Ok(summary
+                .lines()
+                .next()
+                .unwrap_or("Call completed")
+                .to_string())
+        } else {
+            let prepared = rvs_harness::prepare_call(&mut self.sim, &spec)?;
+            self.sim
+                .exec_log
+                .push_str(&format!("SETUP {}() (ready to step)\n", prepared.func));
+            Ok(format!(
+                "Ready to step {}() at 0x{:x} (sp=0x{:x}, ra=0x{:x})",
+                prepared.func,
+                self.sim.regs.pc,
+                self.sim.regs.read_x(2),
+                self.sim.regs.read_x(1)
+            ))
+        }
+    }
+
+    fn run_tests(&mut self, extra_tests: Option<&str>) -> Result<String, String> {
+        let report = rvs_harness::run_test_suite(
+            &self.sim.source,
+            extra_tests,
+            Some(self.sim.dialect),
+            3000,
+        )?;
+        self.sim.output.clear();
+        self.sim.output.push_str(&report.formatted);
+        Ok(format!(
+            "Tests: {}/{} passed ({} failed)",
+            report.passed,
+            report.passed + report.failed,
+            report.failed
+        ))
     }
 }
 
@@ -1030,4 +1097,45 @@ pub fn run_batch_file(
         },
     };
     rvs_format::run_batch_file(asm, input, out, timeout_ms, opts)
+}
+
+/// CLI `--test` entry point: run `@test` directives and return `(passed, failed, formatted)`.
+pub fn run_cli_tests(
+    asm: &std::path::Path,
+    extra_tests: Option<&std::path::Path>,
+    dialect: Option<rvs_machine::Dialect>,
+    timeout_ms: u64,
+) -> Result<(usize, usize, String), String> {
+    let source = std::fs::read_to_string(asm).map_err(|e| format!("ERROR: {e}"))?;
+    let extra = match extra_tests {
+        Some(p) => Some(std::fs::read_to_string(p).map_err(|e| format!("ERROR: {e}"))?),
+        None => None,
+    };
+    let asm_dialect = dialect.map(|d| match d {
+        rvs_machine::Dialect::Rvs => rvs_transpile::AssemblyDialect::Rvs,
+        rvs_machine::Dialect::Gnu => rvs_transpile::AssemblyDialect::Gnu,
+    });
+    let report = rvs_harness::run_test_suite(&source, extra.as_deref(), asm_dialect, timeout_ms)?;
+    Ok((report.passed, report.failed, report.formatted))
+}
+
+/// CLI `--call` entry point: assemble `asm` and execute one `func(args...)` call.
+pub fn run_cli_call(
+    asm: &std::path::Path,
+    spec_text: &str,
+    dialect: Option<rvs_machine::Dialect>,
+    timeout_ms: u64,
+) -> Result<String, String> {
+    let source = std::fs::read_to_string(asm).map_err(|e| format!("ERROR: {e}"))?;
+    let mut sim = Simulator::new();
+    sim.dialect = dialect
+        .map(|d| match d {
+            rvs_machine::Dialect::Rvs => rvs_transpile::AssemblyDialect::Rvs,
+            rvs_machine::Dialect::Gnu => rvs_transpile::AssemblyDialect::Gnu,
+        })
+        .unwrap_or_else(|| rvs_transpile::detect_dialect(&source));
+    sim.trace = false;
+    rvs_assembler::assemble(&mut sim, &source).map_err(|e| format!("ERROR: {}", e.message))?;
+    let spec = rvs_harness::parse_call_spec(spec_text)?;
+    rvs_harness::run_single_call(&mut sim, &spec, timeout_ms)
 }

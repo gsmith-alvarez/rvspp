@@ -11,6 +11,7 @@ members = [
   "crates/rvs-fpu",
   "crates/rvs-ecall",
   "crates/rvs-executor",
+  "crates/rvs-harness",
   "crates/rvs-format",
   "crates/rvs-editor",
   "crates/rvs-explorer",

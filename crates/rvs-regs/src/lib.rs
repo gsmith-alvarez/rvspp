@@ -30,6 +30,13 @@ pub fn parse_reg(s: &str) -> Option<u8> {
         .map(|(_, idx)| *idx)
 }
 
+/// True when `s` names a floating-point register (`f0`..`f31`, `ft*`, `fs*`,
+/// `fa*`), excluding the integer frame-pointer alias `fp` (`x8`).
+pub fn is_fp_reg(s: &str) -> bool {
+    let lower = s.to_ascii_lowercase();
+    lower != "fp" && lower.starts_with('f') && parse_reg(&lower).is_some()
+}
+
 /// ABI display label for an integer register index (matches the first
 /// occurrence of `xN` in RVS046's `::regs` table, so `x8` displays as `s0`).
 pub fn abi_name(idx: u8) -> &'static str {

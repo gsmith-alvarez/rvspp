@@ -382,6 +382,13 @@ fn is_directive(tok: &str) -> bool {
             | ".SPACE"
             | ".ZERO"
             | ".ALIGN"
+            | ".BALIGN"
+            | ".P2ALIGN"
+            | ".STRUCT"
+            | ".EQU"
+            | ".SET"
+            | ".SKIP"
+            | ".SECTION"
             | ".BSS"
             | ".RODATA"
     )

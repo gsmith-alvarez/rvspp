@@ -191,6 +191,7 @@ pub fn check_machine_seam(root: &Path) -> Vec<String> {
         "rvs-tcl",
         "rvs-regs",
         "rvs-transpile",
+        "rvs-harness",
     ];
 
     let mut violations = Vec::new();
