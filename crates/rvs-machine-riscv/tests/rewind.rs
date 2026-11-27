@@ -3,7 +3,7 @@
 //! Snapshots are deltas (a register copy + a mark into the memory undo
 //! journal), so these tests pin the equivalence with a fresh forward run.
 
-use rvs_machine::{LoadOutcome, Machine};
+use rvs_machine::{ExecutionWidth, LoadOutcome, Machine};
 use rvs_machine_riscv::RiscV;
 
 /// A loop that stores one cell per iteration, so history contains both
@@ -123,4 +123,35 @@ fn dropping_snapshots_keeps_later_rewinds_valid() {
         reference.step();
     }
     assert_eq!(fingerprint(&m), fingerprint(&reference));
+}
+
+#[test]
+fn test_suite_uses_selected_execution_width() {
+    let source = "\
+# @test width() == -1
+# @test width() == 1
+width:  addi x10, x0, 1
+        slli x10, x10, 31
+        srai x10, x10, 31
+        jalr x0, 0(x1)
+";
+    let mut machine = RiscV::new();
+    assert!(matches!(machine.load(source), LoadOutcome::Ok));
+
+    assert_eq!(
+        machine.run_tests(None).unwrap(),
+        "Tests: 1/2 passed (1 failed)"
+    );
+    let output = &machine.sim().output;
+    assert!(output.contains("FAIL [L1]"), "{output}");
+    assert!(output.contains("PASS [L2]"), "{output}");
+
+    assert!(machine.set_execution_width(ExecutionWidth::Bits32));
+    assert_eq!(
+        machine.run_tests(None).unwrap(),
+        "Tests: 1/2 passed (1 failed)"
+    );
+    let output = &machine.sim().output;
+    assert!(output.contains("PASS [L1]"), "{output}");
+    assert!(output.contains("FAIL [L2]"), "{output}");
 }

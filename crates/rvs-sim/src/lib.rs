@@ -378,7 +378,11 @@ impl Simulator {
             let parent_sp = std::cmp::max(frame.entry_sp, next_sp);
             let frame_size = parent_sp.saturating_sub(frame_sp);
 
-            let slot_size = if self.regs.xlen() == rvs_regs::Xlen::X32 { 4 } else { 8 };
+            let slot_size = if self.regs.xlen() == rvs_regs::Xlen::X32 {
+                4
+            } else {
+                8
+            };
             let mut slots = Vec::new();
             if frame_size > 0 && frame_size <= 512 {
                 let mut addr = parent_sp.saturating_sub(slot_size);

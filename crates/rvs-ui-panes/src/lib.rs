@@ -127,11 +127,7 @@ pub fn draw_source<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
     let dialect = app.machine.dialect();
     let is_rvs = dialect == rvs_machine::Dialect::Rvs;
     let is_gnu = dialect == rvs_machine::Dialect::Gnu;
-    let mut toolbar = vec![
-        pill("RVS", is_rvs),
-        pill("GNU", is_gnu),
-        btn("TRANSPILE"),
-    ];
+    let mut toolbar = vec![pill("RVS", is_rvs), pill("GNU", is_gnu), btn("TRANSPILE")];
     if let Some(width) = app.machine.execution_width() {
         let label = match width {
             rvs_machine::ExecutionWidth::Bits32 => "RV32",

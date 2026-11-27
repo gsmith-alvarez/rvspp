@@ -5,9 +5,9 @@
 //! crate directly; it receives [`rvs_machine::ViewState`] values.
 
 use rvs_machine::{
-    expand_tabs, ConventionView, Dialect, ExecutionWidth, FrameView, LoadError, LoadOutcome, Machine,
-    MetricsView, PromptView, RegisterChanges, RichLine, Segment, SlotView, StackView, StepOutcome,
-    Tone, ViewRequest, ViewState,
+    expand_tabs, ConventionView, Dialect, ExecutionWidth, FrameView, LoadError, LoadOutcome,
+    Machine, MetricsView, PromptView, RegisterChanges, RichLine, Segment, SlotView, StackView,
+    StepOutcome, Tone, ViewRequest, ViewState,
 };
 use rvs_memory::MemoryCell;
 use rvs_sim::Simulator;
@@ -126,9 +126,10 @@ impl Machine for RiscV {
                     rvs_regs::Xlen::X64 => Simulator::START_DEFAULT,
                 };
                 self.sim.sym.insert("START".to_string(), start.to_string());
-                self.sim.regs.pc = self.sim.regs.normalize(
-                    rvs_tcl::parse_int(start).unwrap_or(0) as u64,
-                );
+                self.sim.regs.pc = self
+                    .sim
+                    .regs
+                    .normalize(rvs_tcl::parse_int(start).unwrap_or(0) as u64);
                 self.sim.listing = format!("{}ERROR: {}\n\n", err.progress, err.message);
                 LoadOutcome::Err(LoadError {
                     progress: err.progress,
@@ -546,7 +547,9 @@ impl Machine for RiscV {
         // in the other dialect, matching `:transpile <target>` semantics.
         Some(match target {
             Dialect::Gnu => rvs_transpile::transpile_rvs_to_gnu(source),
-            Dialect::Rvs => rvs_transpile::transpile_gnu_to_rvs_with_xlen(source, self.sim.regs.xlen()),
+            Dialect::Rvs => {
+                rvs_transpile::transpile_gnu_to_rvs_with_xlen(source, self.sim.regs.xlen())
+            }
         })
     }
 
@@ -599,6 +602,7 @@ impl Machine for RiscV {
             extra_tests,
             Some(self.sim.dialect),
             3000,
+            self.sim.regs.xlen(),
         )?;
         self.sim.output.clear();
         self.sim.output.push_str(&report.formatted);
@@ -749,7 +753,13 @@ impl RiscV {
                     }
                 }
                 MemoryCell::Instruction(inst) => {
-                    let enc = rvs_assembler::encode(&inst.op, &inst.raw_args, addr, &self.sim.sym, self.sim.regs.xlen());
+                    let enc = rvs_assembler::encode(
+                        &inst.op,
+                        &inst.raw_args,
+                        addr,
+                        &self.sim.sym,
+                        self.sim.regs.xlen(),
+                    );
                     let fmt_tag = enc.bin.split_whitespace().next();
                     if req.flags.list_bin {
                         push_sep(&mut segs);
@@ -1140,7 +1150,13 @@ pub fn run_cli_tests(
         rvs_machine::Dialect::Rvs => rvs_transpile::AssemblyDialect::Rvs,
         rvs_machine::Dialect::Gnu => rvs_transpile::AssemblyDialect::Gnu,
     });
-    let report = rvs_harness::run_test_suite(&source, extra.as_deref(), asm_dialect, timeout_ms)?;
+    let report = rvs_harness::run_test_suite(
+        &source,
+        extra.as_deref(),
+        asm_dialect,
+        timeout_ms,
+        rvs_regs::Xlen::X64,
+    )?;
     Ok((report.passed, report.failed, report.formatted))
 }
 

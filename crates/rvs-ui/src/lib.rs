@@ -9,7 +9,7 @@ use ratatui::Frame;
 
 use rvs_app::{App, Modal, Mode, Pane};
 use rvs_app_cmds::AppCommands;
-use rvs_machine::Machine;
+use rvs_machine::{ExecutionWidth, Machine};
 use rvs_ui_modal::{centered_rect, draw_modal};
 use rvs_ui_panes::{draw_exec, draw_inp, draw_listing, draw_mem, draw_out, draw_regs, draw_source};
 
@@ -300,15 +300,21 @@ pub fn handle_click<M: Machine>(app: &mut App<M>, col: u16, row: u16) {
             let rel_x = col.saturating_sub(rect.x + 1);
             match pane {
                 Pane::Listing => {
+                    let txt_start = match app.machine.execution_width() {
+                        Some(ExecutionWidth::Bits32) => 23,
+                        _ => 31,
+                    };
+                    let speed_start = txt_start + 14;
+                    let bp_start = speed_start + 8 + app.run_speed.label().len() as u16;
                     if rel_x < 10 {
                         app.reset_pc();
-                    } else if (31..38).contains(&rel_x) {
+                    } else if (txt_start..txt_start + 7).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Listing, 1);
-                    } else if (38..45).contains(&rel_x) {
+                    } else if (txt_start + 7..speed_start).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Listing, 2);
-                    } else if (45..56).contains(&rel_x) {
+                    } else if (speed_start..bp_start).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Listing, 3);
-                    } else if (56..63).contains(&rel_x) {
+                    } else if (bp_start..bp_start + 6).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Listing, 4);
                     }
                 }

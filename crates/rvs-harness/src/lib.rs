@@ -751,7 +751,8 @@ pub fn format_call_result(sim: &Simulator, prepared: &PreparedCall) -> String {
     let a0 = sim.regs.read_x(10);
     let mut lines = vec![format!(
         "{}() => a0 = {} (0x{a0:x})",
-        prepared.func, sim.regs.signed(a0)
+        prepared.func,
+        sim.regs.signed(a0)
     )];
     for buf in &prepared.buffers {
         let (idx, addr) = (buf.arg_index, buf.addr);
@@ -907,6 +908,7 @@ pub fn run_test_suite(
     extra_tests: Option<&str>,
     dialect: Option<AssemblyDialect>,
     timeout_ms: u64,
+    xlen: rvs_regs::Xlen,
 ) -> Result<TestSuiteReport, String> {
     let test_text = extra_tests.unwrap_or(source);
     let parsed = parse_test_directives(test_text);
@@ -946,6 +948,7 @@ pub fn run_test_suite(
         };
 
         let mut sim = Simulator::new();
+        sim.regs.set_xlen(xlen);
         sim.dialect = resolved_dialect;
         sim.trace = false;
         if let Err(err) = rvs_assembler::assemble(&mut sim, source) {

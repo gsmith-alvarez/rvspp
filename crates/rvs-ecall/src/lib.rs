@@ -59,7 +59,9 @@ fn get_c_string(sim: &Simulator, start: u64) -> SimResult<String> {
                 break;
             }
             if addr == 0xffff_fff8 {
-                return Err(SimError("ERROR: string crosses RV32 address-space boundary".into()));
+                return Err(SimError(
+                    "ERROR: string crosses RV32 address-space boundary".into(),
+                ));
             }
             addr += 8;
         }
@@ -72,7 +74,9 @@ fn put_c_string(sim: &mut Simulator, start: u64, text: &str) -> SimResult<String
     if sim.regs.xlen() == Xlen::X32 {
         let len = text.chars().count() as u64;
         if len > 0x1_0000_0000 - start {
-            return Err(SimError("ERROR: string crosses RV32 address-space boundary".into()));
+            return Err(SimError(
+                "ERROR: string crosses RV32 address-space boundary".into(),
+            ));
         }
     }
     sim.mem.put_c_string(start, text)
@@ -197,9 +201,7 @@ fn ecall_a7(sim: &mut Simulator) -> Result<bool, SimError> {
         }
         9 => {
             let next = sim.heap_break.checked_add(a0.max(8));
-            if sim.regs.xlen() == Xlen::X32
-                && next.is_none_or(|value| value > u32::MAX as u64)
-            {
+            if sim.regs.xlen() == Xlen::X32 && next.is_none_or(|value| value > u32::MAX as u64) {
                 return Err(SimError("ERROR: heap exceeds RV32 address space".into()));
             }
             sim.regs.write_x(10, sim.heap_break, false);

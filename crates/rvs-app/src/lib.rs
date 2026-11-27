@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 
 use rvs_editor::Editor;
 use rvs_machine::{
-    Dialect, LoadOutcome, Machine, RegisterChanges, StepOutcome, ViewFlags, ViewRequest,
+    Dialect, ExecutionWidth, LoadOutcome, Machine, RegisterChanges, StepOutcome, ViewFlags,
+    ViewRequest,
 };
 
 /// Parse one batch-entry line: `<asm> <in> <out> [timeout_ms]`.
@@ -473,6 +474,10 @@ impl<M: Machine> App<M> {
             return;
         }
         let target = self.machine.pc().wrapping_add(4);
+        let target = match self.machine.execution_width() {
+            Some(ExecutionWidth::Bits32) => u64::from(target as u32),
+            _ => target,
+        };
         self.run_until(target, "Step over");
     }
 

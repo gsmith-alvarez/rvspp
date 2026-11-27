@@ -149,28 +149,32 @@ exit:
 
 #[test]
 fn lab_s1_reverse_test_suite_passes() {
-    let report = run_test_suite(LAB_S1_REVERSE, None, None, 2000).expect("suite");
+    let report =
+        run_test_suite(LAB_S1_REVERSE, None, None, 2000, rvs_regs::Xlen::X64).expect("suite");
     assert_eq!(report.failed, 0, "failures:\n{}", report.formatted);
     assert_eq!(report.passed, 2);
 }
 
 #[test]
 fn lab_s1_bigcall_struct_and_rv32_stack_args_pass() {
-    let report = run_test_suite(LAB_S1_BIGCALL, None, None, 2000).expect("suite");
+    let report =
+        run_test_suite(LAB_S1_BIGCALL, None, None, 2000, rvs_regs::Xlen::X64).expect("suite");
     assert_eq!(report.failed, 0, "failures:\n{}", report.formatted);
     assert_eq!(report.passed, 1);
 }
 
 #[test]
 fn lab_s1_strlen32_test_suite_passes() {
-    let report = run_test_suite(LAB_S1_STRLEN32, None, None, 2000).expect("suite");
+    let report =
+        run_test_suite(LAB_S1_STRLEN32, None, None, 2000, rvs_regs::Xlen::X64).expect("suite");
     assert_eq!(report.failed, 0, "failures:\n{}", report.formatted);
     assert_eq!(report.passed, 5);
 }
 
 #[test]
 fn lab_s1_struint_test_suite_passes() {
-    let report = run_test_suite(LAB_S1_STRUINT, None, None, 2000).expect("suite");
+    let report =
+        run_test_suite(LAB_S1_STRUINT, None, None, 2000, rvs_regs::Xlen::X64).expect("suite");
     assert_eq!(report.failed, 0, "failures:\n{}", report.formatted);
     assert_eq!(report.passed, 8);
 }
@@ -215,7 +219,7 @@ parity_done:
     addi a0, t2, 0
     jalr zero, 0(ra)
 "#;
-    let report = run_test_suite(src, None, None, 2000).expect("suite");
+    let report = run_test_suite(src, None, None, 2000, rvs_regs::Xlen::X64).expect("suite");
     assert_eq!(report.failed, 0, "failures:\n{}", report.formatted);
     assert_eq!(report.passed, 1);
 }

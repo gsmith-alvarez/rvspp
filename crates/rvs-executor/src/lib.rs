@@ -52,8 +52,16 @@ pub struct PendingInput {
 /// Shared ALU with Tcl bignum semantics: signed operands are `i64`
 /// (`format %ld`), unsigned are raw u64; results truncate to 64 bits.
 fn alu(op: AluOp, a: u64, b: u64, unsigned: bool, regs: &RegisterFile) -> SimResult<u64> {
-    let a = if unsigned { regs.normalize(a) } else { regs.signed(a) as u64 };
-    let b = if unsigned { regs.normalize(b) } else { regs.signed(b) as u64 };
+    let a = if unsigned {
+        regs.normalize(a)
+    } else {
+        regs.signed(a) as u64
+    };
+    let b = if unsigned {
+        regs.normalize(b)
+    } else {
+        regs.signed(b) as u64
+    };
     let result: i128 = match (op, unsigned) {
         (AluOp::Add, false) => (a as i64 as i128) + (b as i64 as i128),
         (AluOp::Sub, false) => (a as i64 as i128) - (b as i64 as i128),
@@ -140,7 +148,9 @@ fn type_i(sim: &mut Simulator, args: &[String], op: AluOp, unsigned: bool) -> Si
 /// `Smem`: store the low bytes of `rs1` at `x[rs2] + sext(imm)`.
 fn smem(sim: &mut Simulator, args: &[String], nbytes: usize) -> SimResult<()> {
     let base = read_x_arg(sim, &args[1])?;
-    let addr = sim.regs.normalize(base.wrapping_add(imm12(&args[2])? as u64));
+    let addr = sim
+        .regs
+        .normalize(base.wrapping_add(imm12(&args[2])? as u64));
     let idx = reg_index(&args[0])?;
     let reg_val = sim.regs.read_x(idx);
     let mask = if nbytes == 8 {
@@ -156,7 +166,9 @@ fn smem(sim: &mut Simulator, args: &[String], nbytes: usize) -> SimResult<()> {
 /// `Lmem`: load and sign-extend unless `unsigned`.
 fn lmem(sim: &mut Simulator, args: &[String], nbytes: usize, unsigned: bool) -> SimResult<()> {
     let base = read_x_arg(sim, &args[1])?;
-    let addr = sim.regs.normalize(base.wrapping_add(imm12(&args[2])? as u64));
+    let addr = sim
+        .regs
+        .normalize(base.wrapping_add(imm12(&args[2])? as u64));
     let bits = sim.mem.read_bytes(addr, nbytes)?;
     // Sign-extend sub-word loads; a doubleword is already 64 bits wide (a
     // `1 << 64` mask would overflow).
@@ -182,7 +194,9 @@ fn type_sb(sim: &mut Simulator, args: &[String], op: BranchOp, unsigned: bool) -
     };
     if taken {
         let off = imm12(&args[2])?;
-        sim.regs.pc = sim.regs.normalize(sim.regs.pc.wrapping_add((off << 1) as u64).wrapping_sub(4));
+        sim.regs.pc = sim
+            .regs
+            .normalize(sim.regs.pc.wrapping_add((off << 1) as u64).wrapping_sub(4));
     }
     Ok(())
 }
@@ -452,7 +466,9 @@ fn jal(sim: &mut Simulator, args: &[String]) -> SimResult<()> {
     let ret = sim.regs.pc;
     write_x(sim, &args[0], ret, true)?;
     let off = imm20(&args[1])?;
-    sim.regs.pc = sim.regs.normalize(sim.regs.pc.wrapping_add((off << 1) as u64).wrapping_sub(4));
+    sim.regs.pc = sim
+        .regs
+        .normalize(sim.regs.pc.wrapping_add((off << 1) as u64).wrapping_sub(4));
     Ok(())
 }
 
@@ -555,7 +571,9 @@ fn execute_fast(sim: &mut Simulator, dec: DecodedInstr) -> SimResult<bool> {
                 (BranchOp::Lt, true) | (BranchOp::LtU, _) => a < b,
             };
             if taken {
-                sim.regs.pc = sim.regs.normalize(sim.regs.pc.wrapping_add((off << 1) as u64).wrapping_sub(4));
+                sim.regs.pc = sim
+                    .regs
+                    .normalize(sim.regs.pc.wrapping_add((off << 1) as u64).wrapping_sub(4));
             }
             Ok(false)
         }
@@ -599,7 +617,9 @@ fn execute_fast(sim: &mut Simulator, dec: DecodedInstr) -> SimResult<bool> {
         DecodedInstr::Jal { rd, off } => {
             let ret = sim.regs.pc;
             sim.regs.write_x(rd, ret, true);
-            sim.regs.pc = sim.regs.normalize(sim.regs.pc.wrapping_add((off << 1) as u64).wrapping_sub(4));
+            sim.regs.pc = sim
+                .regs
+                .normalize(sim.regs.pc.wrapping_add((off << 1) as u64).wrapping_sub(4));
             Ok(false)
         }
         DecodedInstr::Jalr { rd, rs1, imm } => {
@@ -633,8 +653,10 @@ pub fn step(sim: &mut Simulator) -> StepResult {
     let inst_pc = sim.regs.pc;
     if sim.return_sentinel == Some(inst_pc) {
         let a0 = sim.regs.read_x(10);
-        sim.exec_log
-            .push_str(&format!("RETURN (a0 = {} / 0x{a0:x})\n", sim.regs.signed(a0)));
+        sim.exec_log.push_str(&format!(
+            "RETURN (a0 = {} / 0x{a0:x})\n",
+            sim.regs.signed(a0)
+        ));
         return StepResult::Halted;
     }
     sim.regs.pc = sim.regs.normalize(inst_pc.wrapping_add(4));
