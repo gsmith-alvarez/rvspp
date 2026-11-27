@@ -9,7 +9,7 @@
 
 An interactive terminal RISC-V simulator and debugger written in Rust, built as a drop-in replacement for the 2019 educational simulator `RVS046.tcl` used in university computer architecture courses: real Vim modal editing, reversible execution, live calling convention checking, call stack inspection, and no runtime dependencies (no Tcl, Tk, Java, X11 or browser).
 
-> **What this is:** a debugger for the *RVS course dialect* (RV64 integer + M + a subset of F/D), with byte-exact `kkbatch` report parity and a syntax-level GNU mode bolted on.
+> **What this is:** a debugger for the *RVS course dialect* (RV64 by default, switchable to RV32 in the interactive debugger, plus M and a subset of F/D), with byte-exact `kkbatch` report parity and a syntax-level GNU mode bolted on.
 > **What this is not:** a general RISC-V ISA simulator. No atomics, no compressed instructions, no executed CSRs, no traps/privilege/VM, no ELF or GCC output, one hart. See [Scope & Limitations](#scope--limitations).
 
 ![RVS++ main view: source editor, assembly listing, registers, memory, execution trace](docs/img/overview.png)
@@ -264,6 +264,7 @@ Then run `direnv allow`.
 | `/` then `Ctrl+N` / `Ctrl+P` | Search the source buffer, then repeat next / previous match |
 | `r` | **Run**: Execute continuously until `ebreak`, error, stop, or breakpoint |
 | `x` | **Stop**: Halt continuous execution |
+| `:xlen [32\|64]` | Report or select execution width. Changing it resets debugging state and recompiles the current buffer; batch remains RV64. |
 | `B` | **Breakpoint (Source)**: Toggle breakpoint on current cursor line (red `● `) |
 | `b` | **Breakpoint (Listing)**: Toggle breakpoint on current PC |
 | `+` / `]` | **Speed Up**: Increase animation speed (`1Hz` $\to$ `5Hz` $\to$ `20Hz` $\to$ `Max`) |
@@ -293,6 +294,7 @@ Each pane has an interactive bottom toolbar you can click:
   - `[RVS]`: Switch dialect to canonical RVS mode.
   - `[GNU]`: Switch dialect to standard GNU mode (directives & pseudo-instructions).
   - `[TRANSPILE]`: In-editor two-way transpiler (translates buffer between GNU and RVS syntax in-place and flips mode).
+  - `[RV32]` / `[RV64]`: Switch execution width, resetting debugger state and recompiling the buffer.
 - **`Listing`**:
   - `[TXT]` (key `1`): Toggle raw source text column.
   - `[CLR]` (key `2`): Toggle correlated bitfield-to-operand colorizer.

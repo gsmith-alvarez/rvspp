@@ -9,6 +9,7 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+rvs-regs = { path = "../rvs-regs" }
 
 
 [dev-dependencies]

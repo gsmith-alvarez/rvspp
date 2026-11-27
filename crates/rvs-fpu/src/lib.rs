@@ -208,7 +208,7 @@ pub fn fsqrt(sim: &mut Simulator, args: &[String]) -> SimResult<()> {
 /// string is `a64("0x" + digits)`, so its bits are the byte-swapped cell.
 pub fn flmem(sim: &mut Simulator, args: &[String], nbytes: usize) -> SimResult<()> {
     let base = read_x_arg(sim, &args[1])?;
-    let addr = base.wrapping_add(imm_raw(&args[2])?);
+    let addr = sim.regs.normalize(base.wrapping_add(imm_raw(&args[2])?));
     let cell = sim.mem.read_bytes(addr, nbytes)?;
     let idx = reg_index(&args[0])?;
     sim.regs.write_f_bits(idx, cell, false);
@@ -218,7 +218,7 @@ pub fn flmem(sim: &mut Simulator, args: &[String], nbytes: usize) -> SimResult<(
 /// `FSmem` / `FSD`: store FP bits; the cell receives the swapped digits.
 pub fn fsmem(sim: &mut Simulator, args: &[String], nbytes: usize) -> SimResult<()> {
     let base = read_x_arg(sim, &args[1])?;
-    let addr = base.wrapping_add(imm_raw(&args[2])?);
+    let addr = sim.regs.normalize(base.wrapping_add(imm_raw(&args[2])?));
     let idx = reg_index(&args[0])?;
     let bits = sim.regs.read_f_bits(idx);
     let mask = if nbytes == 8 {

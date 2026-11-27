@@ -150,8 +150,17 @@ const ABI_LOOKUP: [(&str, u8); 65] = [
     ("ft11", 31),
 ];
 
+/// Integer register and address width.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Xlen {
+    X32,
+    #[default]
+    X64,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct RegisterFile {
+    xlen: Xlen,
     x: [u64; 32],
     f: [u64; 32],
     /// `true` when the register's hex digits were last written uppercase.
@@ -163,6 +172,36 @@ pub struct RegisterFile {
 impl RegisterFile {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn xlen(&self) -> Xlen {
+        self.xlen
+    }
+
+    pub fn set_xlen(&mut self, xlen: Xlen) {
+        self.xlen = xlen;
+        if xlen == Xlen::X32 {
+            for value in &mut self.x {
+                *value = u64::from(*value as u32);
+            }
+            self.pc = u64::from(self.pc as u32);
+        }
+    }
+
+    /// Normalize an integer or address to the selected width.
+    pub fn normalize(&self, value: u64) -> u64 {
+        match self.xlen {
+            Xlen::X32 => u64::from(value as u32),
+            Xlen::X64 => value,
+        }
+    }
+
+    /// Interpret the low XLEN bits as a signed integer.
+    pub fn signed(&self, value: u64) -> i64 {
+        match self.xlen {
+            Xlen::X32 => i64::from(value as u32 as i32),
+            Xlen::X64 => value as i64,
+        }
     }
 
     /// `regc`: zero all registers and the PC.
@@ -197,7 +236,7 @@ impl RegisterFile {
     /// `reg2i` resetting `::x0` before every access).
     pub fn write_x(&mut self, idx: u8, val: u64, upper: bool) {
         if idx != 0 {
-            self.x[idx as usize] = val;
+            self.x[idx as usize] = self.normalize(val);
             self.x_upper[idx as usize] = upper;
         }
     }
@@ -234,14 +273,14 @@ impl RegisterFile {
         self.f_upper[idx as usize]
     }
 
-    /// The register's display string, exactly as Tcl would hold it
-    /// (`0x` + 16 hex digits with the writer's case).
+    /// The register's display string, preserving the writer's hex case.
     pub fn x_string(&self, idx: u8) -> String {
         let v = self.read_x(idx);
+        let width = if self.xlen == Xlen::X32 { 8 } else { 16 };
         if self.x_upper[idx as usize] {
-            format!("0x{v:016X}")
+            format!("0x{v:0width$X}")
         } else {
-            format!("0x{v:016x}")
+            format!("0x{v:0width$x}")
         }
     }
 
@@ -257,7 +296,8 @@ impl RegisterFile {
     }
 
     pub fn pc_string(&self) -> String {
-        format!("0x{:016x}", self.pc)
+        let width = if self.xlen == Xlen::X32 { 8 } else { 16 };
+        format!("0x{:0width$x}", self.pc)
     }
 }
 
@@ -297,6 +337,21 @@ mod tests {
         rf.write_f64(2, 2.0, false);
         assert_eq!(rf.f_string(2), "0x4000000000000000");
         assert_eq!(rf.read_f64(2), 2.0);
+    }
+
+    #[test]
+    fn rv32_register_width_survives_clear() {
+        let mut rf = RegisterFile::new();
+        rf.set_xlen(Xlen::X32);
+        rf.write_x(1, u64::MAX, true);
+        rf.write_x(0, 1, false);
+        assert_eq!(rf.read_x(1), u32::MAX as u64);
+        assert_eq!(rf.signed(rf.read_x(1)), -1);
+        assert_eq!(rf.x_string(1), "0xFFFFFFFF");
+        assert_eq!(rf.x_string(0), "0x00000000");
+        rf.clear();
+        assert_eq!(rf.xlen(), Xlen::X32);
+        assert_eq!(rf.pc_string(), "0x00000000");
     }
 
     #[test]

@@ -1387,3 +1387,106 @@ end:
     );
     assert!(app.machine.sim().output.contains("PASS"));
 }
+
+#[test]
+fn test_xlen_switch_recompiles_and_resets_debugger() {
+    use rvs_machine::ExecutionWidth;
+
+    let mut app = App::<RiscV>::new(None);
+    app.editor.set_text("addi x1,x0,7\n");
+    app.compile();
+    app.on_key(char_key('n'));
+    assert!(!app.step_history.is_empty());
+    app.breakpoints.insert(0);
+    app.editor.set_text("addi x1,x0,-1\naddi x2,x1,1\n");
+    app.command_input = ":xlen 32".into();
+    app.execute_command();
+    assert_eq!(app.machine.execution_width(), Some(ExecutionWidth::Bits32));
+    assert_eq!(app.machine.sim().regs.read_x(1), 0);
+    assert!(app.breakpoints.is_empty());
+    assert!(app.step_history.is_empty());
+    assert!(app.editor.text().contains("addi x2,x1,1"));
+    app.on_key(char_key('n'));
+    app.on_key(char_key('n'));
+    assert_eq!(app.machine.sim().regs.read_x(1), 0xffff_ffff);
+    assert_eq!(app.machine.sim().regs.read_x(2), 0);
+    let mut terminal = Terminal::new(TestBackend::new(120, 36)).unwrap();
+    terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+    assert!(terminal.backend().to_string().contains("RV32"));
+    assert!(terminal.backend().to_string().contains("PC:0x00000008"));
+
+    app.command_input = ":xlen 32".into();
+    app.execute_command();
+    assert_eq!(app.machine.sim().regs.read_x(1), 0xffff_ffff);
+    app.command_input = ":xlen 16".into();
+    app.execute_command();
+    assert_eq!(app.status, "ERROR: usage: :xlen [32|64]");
+    app.command_input = ":xlen 64".into();
+    app.execute_command();
+    assert_eq!(app.machine.execution_width(), Some(ExecutionWidth::Bits64));
+    assert_eq!(app.machine.sim().regs.read_x(1), 0);
+}
+
+#[test]
+fn test_xlen_preserves_settings_and_compile_failure() {
+    use rvs_machine::ExecutionWidth;
+
+    let mut app = App::<RiscV>::new(None);
+    app.machine.set_dialect(Dialect::Gnu);
+    app.machine.set_a7_abi(true);
+    app.machine.set_convention_enabled(true);
+    app.editor.set_text(".org 0x100000000\nli a0, 1\n");
+    app.command_input = ":xlen 32".into();
+    app.execute_command();
+    assert!(app.status.starts_with("ERROR:"));
+    assert_eq!(app.machine.execution_width(), Some(ExecutionWidth::Bits32));
+    assert_eq!(app.machine.dialect(), Dialect::Gnu);
+    assert!(app.machine.a7_abi());
+    assert!(app.machine.convention_enabled());
+
+    app.command_input = ":new!".into();
+    app.execute_command();
+    assert_eq!(app.machine.execution_width(), Some(ExecutionWidth::Bits32));
+    assert!(app.machine.a7_abi());
+    app.command_input = ":xlen".into();
+    app.execute_command();
+    assert!(app.status.contains("RV32"));
+}
+
+#[test]
+fn test_click_execution_width_button() {
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    use rvs_machine::ExecutionWidth;
+
+    let mut app = App::<RiscV>::new(None);
+    app.editor.set_text("addi x1,x0,7\n");
+    app.compile();
+    app.action_next();
+    assert_eq!(app.machine.sim().regs.read_x(1), 7);
+    app.breakpoints.insert(0);
+    app.editor.set_text("addi x1,x0,-1\n");
+
+    let mut terminal = Terminal::new(TestBackend::new(120, 36)).unwrap();
+    terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+    assert!(terminal.backend().to_string().contains("[RV64]"));
+    let source = ui::compute_layout(app.last_area).source;
+    let click = MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: source.x + 1 + 30,
+        row: source.y + source.height - 2,
+        modifiers: KeyModifiers::NONE,
+    };
+    ui::handle_mouse(&mut app, click);
+    assert_eq!(app.machine.execution_width(), Some(ExecutionWidth::Bits32));
+    assert_eq!(app.machine.sim().regs.read_x(1), 0);
+    assert!(app.breakpoints.is_empty());
+    assert!(app.step_history.is_empty());
+    app.action_next();
+    assert_eq!(app.machine.sim().regs.read_x(1), 0xffff_ffff);
+
+    terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+    assert!(terminal.backend().to_string().contains("[RV32]"));
+    ui::handle_mouse(&mut app, click);
+    assert_eq!(app.machine.execution_width(), Some(ExecutionWidth::Bits64));
+    assert_eq!(app.machine.sim().regs.read_x(1), 0);
+}

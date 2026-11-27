@@ -196,12 +196,17 @@ pub fn parse_args(args_str: &str) -> Vec<String> {
     args
 }
 
+/// Convert GNU source using the default RV64 width.
+pub fn transpile_gnu_to_rvs(source: &str) -> String {
+    transpile_gnu_to_rvs_with_xlen(source, rvs_regs::Xlen::X64)
+}
+
 /// Transpiles GNU assembly source into canonical RVS dialect assembly.
 #[expect(
     clippy::cognitive_complexity,
     reason = "GNU dialect parser handles all directives, pseudo-ops, and instructions"
 )]
-pub fn transpile_gnu_to_rvs(source: &str) -> String {
+pub fn transpile_gnu_to_rvs_with_xlen(source: &str, xlen: rvs_regs::Xlen) -> String {
     let mut out = String::with_capacity(source.len() + 128);
     let mut struct_loc: Option<i64> = None;
     let mut struct_syms: BTreeMap<String, i64> = BTreeMap::new();
@@ -515,7 +520,17 @@ pub fn transpile_gnu_to_rvs(source: &str) -> String {
                         let exp = format!("{}, x0, {}", rd, val);
                         emit_line(&mut out, &indent, &label, "addi", &exp, &comment);
                     }
-                    Some(val) if (-2147483648..=2147483647).contains(&val) => {
+                    Some(val) if xlen == rvs_regs::Xlen::X32
+                        && (-2147483648..=4294967295).contains(&val) => {
+                        let signed = val as u32 as i32 as i64;
+                        let lower = ((signed + 2048) & 0xfff) - 2048;
+                        let upper = ((signed - lower) >> 12) & 0xfffff;
+                        let exp1 = format!("{}, 0x{:x}", rd, upper);
+                        let exp2 = format!("{}, {}, {}", rd, rd, lower);
+                        emit_line(&mut out, &indent, &label, "lui", &exp1, "");
+                        emit_line(&mut out, &indent, "", "addi", &exp2, &comment);
+                    }
+                    Some(val) if xlen == rvs_regs::Xlen::X64 && (-2147483648..=2147483647).contains(&val) => {
                         // 32-bit immediate load via lui + addiw
                         let lower = ((val & 0xfff) as i16) as i64;
                         let mut upper = (val - lower) >> 12;

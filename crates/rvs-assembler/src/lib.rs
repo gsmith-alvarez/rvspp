@@ -45,7 +45,7 @@ fn reg_or_err(arg: &str, role: &str, fp_only: bool, reject_fp: bool) -> Result<u
     clippy::cognitive_complexity,
     reason = "instruction encoder matches all RISC-V instruction formats"
 )]
-pub fn encode(op: &str, args: &[String], pc: u64, sym: &BTreeMap<String, String>) -> Encoded {
+pub fn encode(op: &str, args: &[String], pc: u64, sym: &BTreeMap<String, String>, xlen: rvs_regs::Xlen) -> Encoded {
     let desc = match find_instr(op) {
         Some(dd) => dd,
         None => {
@@ -63,6 +63,12 @@ pub fn encode(op: &str, args: &[String], pc: u64, sym: &BTreeMap<String, String>
         }
     };
     let mut e = Encoded::default();
+    if !rvs_asm_syntax::instruction_available(op, xlen) {
+        e.asm = format!("{op} {}", args.join(","));
+        e.asmx = vec![op.to_string()];
+        e.error = Some("ERROR: instruction unavailable in RV32".to_string());
+        return finish(e);
+    }
     // Arg-count guard: never index `args` before the per-format checks below.
     let need = match desc.fmt {
         InstrFmt::U | InstrFmt::Uj | InstrFmt::F2 => 2,
@@ -163,7 +169,12 @@ pub fn encode(op: &str, args: &[String], pc: u64, sym: &BTreeMap<String, String>
                 match (rd, rs1, slbl_imm(&args[2])) {
                     (Err(m), _, _) | (_, Err(m), _) | (_, _, Err(m)) => e.error = Some(m),
                     (Ok(rd), Ok(rs1), Ok(imm)) => {
-                        if let Err(m) = imm12_ok(imm) {
+                        if xlen == rvs_regs::Xlen::X32
+                            && matches!(desc.op, "slli" | "srli" | "srai")
+                            && !(0..=31).contains(&imm)
+                        {
+                            e.error = Some("ERROR: shift immediate OUT OF RANGE [0,31]".to_string());
+                        } else if let Err(m) = imm12_ok(imm) {
                             e.error = Some(m);
                         } else {
                             let rdxp = if rvs_regs::is_fp_reg(&args[0]) {
@@ -493,7 +504,7 @@ pub fn assemble(sim: &mut Simulator, body: &str) -> Result<String, AsmError> {
     }
     let transpiled_storage;
     let source_body = if sim.dialect == rvs_transpile::AssemblyDialect::Gnu {
-        transpiled_storage = rvs_transpile::transpile_gnu_to_rvs(body);
+        transpiled_storage = rvs_transpile::transpile_gnu_to_rvs_with_xlen(body, sim.regs.xlen());
         &transpiled_storage
     } else {
         body
@@ -580,6 +591,9 @@ pub fn assemble(sim: &mut Simulator, body: &str) -> Result<String, AsmError> {
                         sim.sym.insert(label.clone(), tcl::a64(sim.regs.pc));
                     }
                 }
+                if sim.regs.xlen() == rvs_regs::Xlen::X32 && sim.regs.pc > u32::MAX as u64 - 7 {
+                    fail!("placement outside RV32 address space");
+                }
                 if sim.mem.check_addr_conflict(sim.regs.pc, true) {
                     fail!("Overwrite attempt");
                 }
@@ -603,6 +617,9 @@ pub fn assemble(sim: &mut Simulator, body: &str) -> Result<String, AsmError> {
                 Some(v) => v,
                 None => fail!("Wrong ORG value/expr (no forward labels allowed)"),
             };
+            if sim.regs.xlen() == rvs_regs::Xlen::X32 && !(0..=u32::MAX as i128).contains(&value) {
+                fail!("ORG outside RV32 address space");
+            }
             sim.regs.pc = value as i64 as u64;
             if !label.is_empty() {
                 sim.sym.insert(label, tcl::a64(sim.regs.pc));
@@ -628,6 +645,9 @@ pub fn assemble(sim: &mut Simulator, body: &str) -> Result<String, AsmError> {
                 sim.sym.insert(label, tcl::a64(sim.regs.pc));
             }
         }
+        if sim.regs.xlen() == rvs_regs::Xlen::X32 && sim.regs.pc > u32::MAX as u64 - 3 {
+            fail!("placement outside RV32 address space");
+        }
         if sim.mem.check_addr_conflict(sim.regs.pc, false) {
             fail!("Overwrite attempt");
         }
@@ -646,8 +666,8 @@ pub fn assemble(sim: &mut Simulator, body: &str) -> Result<String, AsmError> {
         sim.regs.pc = sim.regs.pc.wrapping_add(4);
     }
     if !sim.sym.contains_key("START") {
-        sim.sym
-            .insert("START".to_string(), Simulator::START_DEFAULT.to_string());
+        let start = if sim.regs.xlen() == rvs_regs::Xlen::X32 { "0xfffffffc" } else { Simulator::START_DEFAULT };
+        sim.sym.insert("START".to_string(), start.to_string());
     }
     let listing = dump(sim);
     sim.regs.pc = sim
@@ -855,7 +875,7 @@ pub fn dump(sim: &mut Simulator) -> String {
                 res.push('\n');
             }
             Some(MemoryCell::Instruction(cell)) => {
-                let enc = encode(&cell.op, &cell.raw_args, addr, &sim.sym);
+                let enc = encode(&cell.op, &cell.raw_args, addr, &sim.sym, sim.regs.xlen());
                 let new_op = enc.asmx.first().cloned().unwrap_or_default();
                 let new_args: Vec<String> = enc.asmx.iter().skip(1).cloned().collect();
                 // Only a successful encoding may replace the cell's operands.

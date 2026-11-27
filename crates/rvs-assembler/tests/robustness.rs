@@ -100,3 +100,57 @@ fn negative_doubleword_load_round_trips() {
     run(&mut sim, 1000);
     assert_eq!(sim.regs.read_x(2), u64::MAX - 4);
 }
+
+#[test]
+fn rv32_availability_and_placement() {
+    use rvs_regs::Xlen;
+    for op in [
+        "ld", "sd", "lwu", "addiw", "slliw", "srliw", "sraiw", "addw",
+        "subw", "sllw", "srlw", "sraw", "mulw", "divw", "divuw", "remw",
+        "remuw", "fcvt.l.d", "fcvt.lu.d", "fcvt.d.l", "fcvt.d.lu",
+        "fmv.x.d", "fmv.d.x",
+    ] {
+        let mut sim = Simulator::new();
+        sim.regs.set_xlen(Xlen::X32);
+        let listing = assemble(&mut sim, &format!("{op} x1,x2,x3")).unwrap();
+        assert!(listing.contains("instruction unavailable in RV32"), "{op}");
+        assert!(matches!(step(&mut sim), StepResult::Halted), "{op}");
+        assert!(sim.exec_log.contains("instruction unavailable in RV32"), "{op}");
+        assert_eq!(sim.regs.read_x(1), 0);
+    }
+    for source in ["org 0x100000000", "org -1", "org 0xfffffffc\nDD 1", "org 0xffffffff\nadd x1,x2,x3"] {
+        let mut sim = Simulator::new();
+        sim.regs.set_xlen(Xlen::X32);
+        assert!(assemble(&mut sim, source).is_err(), "{source}");
+    }
+    for (source, valid) in [("slli x1,x2,31", true), ("slli x1,x2,32", false), ("fld f1,0(x2)", true), ("fsd f1,0(x2)", true)] {
+        let mut sim = Simulator::new();
+        sim.regs.set_xlen(Xlen::X32);
+        let listing = assemble(&mut sim, source).unwrap();
+        assert_eq!(!listing.contains("ERROR:"), valid, "{source}: {listing}");
+    }
+}
+
+#[test]
+fn rv32_gnu_li_loads_full_width_literals() {
+    for (literal, expected) in [
+        ("2048", 2048),
+        ("0x80000000", 0x8000_0000),
+        ("0xffffffff", 0xffff_ffff),
+        ("-2147483648", 0x8000_0000),
+        ("-2049", 0xffff_f7ff),
+    ] {
+        let mut sim = Simulator::new();
+        sim.regs.set_xlen(rvs_regs::Xlen::X32);
+        sim.dialect = rvs_transpile::AssemblyDialect::Gnu;
+        let listing = assemble(&mut sim, &format!("li x1, {literal}")).unwrap();
+        assert!(!listing.contains("ERROR:"), "{literal}: {listing}");
+        assert!(matches!(step(&mut sim), StepResult::Continued));
+        assert!(matches!(step(&mut sim), StepResult::Continued));
+        assert_eq!(sim.regs.read_x(1), expected, "{literal}");
+    }
+    let mut sim = Simulator::new();
+    sim.regs.set_xlen(rvs_regs::Xlen::X32);
+    sim.dialect = rvs_transpile::AssemblyDialect::Gnu;
+    assert!(assemble(&mut sim, "li x1, 4294967296").unwrap().contains("ERROR:"));
+}

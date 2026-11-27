@@ -316,12 +316,23 @@ impl<M: Machine> App<M> {
     pub fn reset_sim_panes(&mut self) {
         let dialect = self.machine.dialect();
         let convention = self.machine.convention_enabled();
+        let width = self.machine.execution_width();
+        let a7_abi = self.machine.a7_abi();
         self.machine.reset();
         self.machine.set_dialect(dialect);
         self.machine.set_convention_enabled(convention);
+        if let Some(width) = width {
+            self.machine.set_execution_width(width);
+        }
+        self.machine.set_a7_abi(a7_abi);
         self.machine.set_source(&self.editor.text());
         self.running = false;
         self.was_running = false;
+        if matches!(self.mode, Mode::Running | Mode::Input) {
+            self.mode = Mode::Normal;
+        }
+        self.at_breakpoint = false;
+        self.last_step_halted = false;
         self.dma_out_available = false;
         self.dma_inp_available = false;
         self.input_line.clear();

@@ -368,8 +368,10 @@ pub fn handle_click<M: Machine>(app: &mut App<M>, col: u16, row: u16) {
                         app.toggle_pane_option(Pane::Source, 1);
                     } else if (7..14).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Source, 2);
-                    } else if (14..28).contains(&rel_x) {
+                    } else if (14..27).contains(&rel_x) {
                         app.toggle_pane_option(Pane::Source, 3);
+                    } else if (27..35).contains(&rel_x) {
+                        app.toggle_pane_option(Pane::Source, 4);
                     }
                 }
             }

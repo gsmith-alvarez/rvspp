@@ -557,6 +557,18 @@ pub const INSTR_TABLE: &[InstrDesc] = &[
     d("fmv.d.x", InstrFmt::F2, 0x53, Some(0x0), Some(0b1111001)),
 ];
 
+/// Whether a known instruction is available at the selected integer width.
+pub fn instruction_available(op: &str, xlen: rvs_regs::Xlen) -> bool {
+    xlen != rvs_regs::Xlen::X32
+        || !matches!(
+            op.to_ascii_lowercase().as_str(),
+            "ld" | "sd" | "lwu" | "addiw" | "slliw" | "srliw" | "sraiw"
+                | "addw" | "subw" | "sllw" | "srlw" | "sraw" | "mulw"
+                | "divw" | "divuw" | "remw" | "remuw" | "fcvt.l.d"
+                | "fcvt.lu.d" | "fcvt.d.l" | "fcvt.d.lu" | "fmv.x.d" | "fmv.d.x"
+        )
+}
+
 const fn d(
     op: &'static str,
     fmt: InstrFmt,
