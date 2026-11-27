@@ -68,6 +68,7 @@ pub fn draw_modal<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
                 Line::raw("  :watch <sp|addr|label> - Stop when that cell's value changes; :cwatch clears"),
                 Line::raw("  / then Ctrl+N/P   - Search the buffer, repeat next/previous match"),
                 Line::raw("  :abi [rvs|a7]     - Syscall convention (course dialect vs RARS a7)"),
+                Line::raw("  :xlen [32|64]     - Change width; resets and recompiles the current buffer"),
                 Line::raw("  +, - ([, ]), :spd - Adjust execution animation speed (1Hz, 5Hz, 20Hz, Max)"),
                 Line::raw("  :mem <sp|addr>    - Jump memory scroll to stack ($sp), 0x0, or arbitrary address"),
                 Line::raw(""),

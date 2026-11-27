@@ -1523,6 +1523,7 @@ name = "rvs-asm-syntax"
 version = "1.1.0"
 dependencies = [
  "rvs-memory",
+ "rvs-regs",
  "rvs-tcl",
 ]
 
@@ -1693,7 +1694,13 @@ name = "rvs-transpile"
 version = "1.1.0"
 dependencies = [
  "proptest",
+ "rvs-regs",
+ "rvs-transpile-expr",
 ]
+
+[[package]]
+name = "rvs-transpile-expr"
+version = "1.1.0"
 
 [[package]]
 name = "rvs-tui"

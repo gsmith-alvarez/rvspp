@@ -557,6 +557,7 @@ pub fn prepare_call(sim: &mut Simulator, spec: &CallSpec) -> Result<PreparedCall
         .ok_or_else(|| format!("symbol \"{}\" not found (compile first)", spec.func))?;
 
     sim.regs.clear();
+    let entry_pc = sim.regs.normalize(entry_pc);
     sim.regs.pc = entry_pc;
     sim.regs.write_x(1, RETURN_SENTINEL, false); // ra
     sim.regs.write_x(2, DEFAULT_SP, false); // sp
@@ -674,7 +675,7 @@ pub fn prepare_call(sim: &mut Simulator, spec: &CallSpec) -> Result<PreparedCall
                     .and_then(|s| tcl::parse_int(s))
                     .map(|v| v as u64)
                     .ok_or_else(|| format!("symbol \"{name}\" not found"))?;
-                slots.push(addr);
+                slots.push(sim.regs.normalize(addr));
             }
         }
     }
@@ -750,7 +751,8 @@ pub fn format_call_result(sim: &Simulator, prepared: &PreparedCall) -> String {
     let a0 = sim.regs.read_x(10);
     let mut lines = vec![format!(
         "{}() => a0 = {} (0x{a0:x})",
-        prepared.func, a0 as i64
+        prepared.func,
+        sim.regs.signed(a0)
     )];
     for buf in &prepared.buffers {
         let (idx, addr) = (buf.arg_index, buf.addr);
@@ -810,7 +812,7 @@ fn check_assertion(
 ) -> Result<(), String> {
     match assertion {
         Assertion::RetEq(expected) => {
-            let actual = sim.regs.read_x(10) as i64;
+            let actual = sim.regs.signed(sim.regs.read_x(10));
             if actual == *expected || (actual as i32 as i64) == *expected {
                 Ok(())
             } else {
@@ -906,6 +908,7 @@ pub fn run_test_suite(
     extra_tests: Option<&str>,
     dialect: Option<AssemblyDialect>,
     timeout_ms: u64,
+    xlen: rvs_regs::Xlen,
 ) -> Result<TestSuiteReport, String> {
     let test_text = extra_tests.unwrap_or(source);
     let parsed = parse_test_directives(test_text);
@@ -945,6 +948,7 @@ pub fn run_test_suite(
         };
 
         let mut sim = Simulator::new();
+        sim.regs.set_xlen(xlen);
         sim.dialect = resolved_dialect;
         sim.trace = false;
         if let Err(err) = rvs_assembler::assemble(&mut sim, source) {

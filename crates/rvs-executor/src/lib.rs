@@ -16,6 +16,7 @@ use rvs_fpu::{
     FOp, SgnMode,
 };
 use rvs_memory::{AluOp, BranchOp, DecodedInstr, MemoryCell, RmKind, SimError, SimResult, WKind};
+use rvs_regs::{RegisterFile, Xlen};
 use rvs_sim::{imm12, imm20, imm_raw, read_x_arg, reg_index, write_x, Simulator};
 use rvs_tcl as tcl;
 
@@ -50,7 +51,17 @@ pub struct PendingInput {
 
 /// Shared ALU with Tcl bignum semantics: signed operands are `i64`
 /// (`format %ld`), unsigned are raw u64; results truncate to 64 bits.
-fn alu(op: AluOp, a: u64, b: u64, unsigned: bool) -> SimResult<u64> {
+fn alu(op: AluOp, a: u64, b: u64, unsigned: bool, regs: &RegisterFile) -> SimResult<u64> {
+    let a = if unsigned {
+        regs.normalize(a)
+    } else {
+        regs.signed(a) as u64
+    };
+    let b = if unsigned {
+        regs.normalize(b)
+    } else {
+        regs.signed(b) as u64
+    };
     let result: i128 = match (op, unsigned) {
         (AluOp::Add, false) => (a as i64 as i128) + (b as i64 as i128),
         (AluOp::Sub, false) => (a as i64 as i128) - (b as i64 as i128),
@@ -73,7 +84,7 @@ fn alu(op: AluOp, a: u64, b: u64, unsigned: bool) -> SimResult<u64> {
             if amount >= 1 << 40 {
                 return Err(SimError("integer value too large to represent".to_string()));
             }
-            if amount > 200 {
+            if amount >= 128 {
                 0
             } else {
                 (a as i128) << amount
@@ -112,7 +123,7 @@ fn alu(op: AluOp, a: u64, b: u64, unsigned: bool) -> SimResult<u64> {
 fn type_r(sim: &mut Simulator, args: &[String], op: AluOp, unsigned: bool) -> SimResult<()> {
     let a = read_x_arg(sim, &args[1])?;
     let b = read_x_arg(sim, &args[2])?;
-    let value = alu(op, a, b, unsigned)?;
+    let value = alu(op, a, b, unsigned, &sim.regs)?;
     write_x(sim, &args[0], value, true)
 }
 
@@ -127,9 +138,9 @@ fn type_i(sim: &mut Simulator, args: &[String], op: AluOp, unsigned: bool) -> Si
         } else {
             imm_signed as u64
         };
-        alu(op, a, imm_u, true)?
+        alu(op, a, imm_u, true, &sim.regs)?
     } else {
-        alu(op, a, imm_signed as u64, false)?
+        alu(op, a, imm_signed as u64, false, &sim.regs)?
     };
     write_x(sim, &args[0], value, true)
 }
@@ -137,7 +148,9 @@ fn type_i(sim: &mut Simulator, args: &[String], op: AluOp, unsigned: bool) -> Si
 /// `Smem`: store the low bytes of `rs1` at `x[rs2] + sext(imm)`.
 fn smem(sim: &mut Simulator, args: &[String], nbytes: usize) -> SimResult<()> {
     let base = read_x_arg(sim, &args[1])?;
-    let addr = base.wrapping_add(imm12(&args[2])? as u64);
+    let addr = sim
+        .regs
+        .normalize(base.wrapping_add(imm12(&args[2])? as u64));
     let idx = reg_index(&args[0])?;
     let reg_val = sim.regs.read_x(idx);
     let mask = if nbytes == 8 {
@@ -153,7 +166,9 @@ fn smem(sim: &mut Simulator, args: &[String], nbytes: usize) -> SimResult<()> {
 /// `Lmem`: load and sign-extend unless `unsigned`.
 fn lmem(sim: &mut Simulator, args: &[String], nbytes: usize, unsigned: bool) -> SimResult<()> {
     let base = read_x_arg(sim, &args[1])?;
-    let addr = base.wrapping_add(imm12(&args[2])? as u64);
+    let addr = sim
+        .regs
+        .normalize(base.wrapping_add(imm12(&args[2])? as u64));
     let bits = sim.mem.read_bytes(addr, nbytes)?;
     // Sign-extend sub-word loads; a doubleword is already 64 bits wide (a
     // `1 << 64` mask would overflow).
@@ -172,19 +187,21 @@ fn type_sb(sim: &mut Simulator, args: &[String], op: BranchOp, unsigned: bool) -
     let taken = match (op, unsigned) {
         (BranchOp::Eq, _) => a == b,
         (BranchOp::Ne, _) => a != b,
-        (BranchOp::Ge, false) => a as i64 >= b as i64,
+        (BranchOp::Ge, false) => sim.regs.signed(a) >= sim.regs.signed(b),
         (BranchOp::Ge, true) | (BranchOp::GeU, _) => a >= b,
-        (BranchOp::Lt, false) => (a as i64) < (b as i64),
+        (BranchOp::Lt, false) => sim.regs.signed(a) < sim.regs.signed(b),
         (BranchOp::Lt, true) | (BranchOp::LtU, _) => a < b,
     };
     if taken {
         let off = imm12(&args[2])?;
-        sim.regs.pc = sim.regs.pc.wrapping_add((off << 1) as u64).wrapping_sub(4);
+        sim.regs.pc = sim
+            .regs
+            .normalize(sim.regs.pc.wrapping_add((off << 1) as u64).wrapping_sub(4));
     }
     Ok(())
 }
 
-fn compute_rm(a: u64, b: u64, kind: RmKind) -> SimResult<u64> {
+fn compute_rm(a: u64, b: u64, kind: RmKind, regs: &RegisterFile) -> SimResult<u64> {
     let (signed_a, signed_b, high) = match kind {
         RmKind::Mul => (true, true, false),
         RmKind::MulH => (true, true, true),
@@ -194,12 +211,12 @@ fn compute_rm(a: u64, b: u64, kind: RmKind) -> SimResult<u64> {
         RmKind::DivU | RmKind::RemU => (false, false, false),
     };
     let sa = if signed_a {
-        a as i64 as i128
+        regs.signed(a) as i128
     } else {
         a as i128
     };
     let sb = if signed_b {
-        b as i64 as i128
+        regs.signed(b) as i128
     } else {
         b as i128
     };
@@ -211,7 +228,7 @@ fn compute_rm(a: u64, b: u64, kind: RmKind) -> SimResult<u64> {
                 sa.wrapping_mul(sb)
             };
             if high {
-                Ok((product >> 64) as u64)
+                Ok((product >> if regs.xlen() == Xlen::X32 { 32 } else { 64 }) as u64)
             } else {
                 Ok(tcl::low64(product))
             }
@@ -251,7 +268,7 @@ fn compute_rm(a: u64, b: u64, kind: RmKind) -> SimResult<u64> {
 fn type_rm(sim: &mut Simulator, args: &[String], kind: RmKind) -> SimResult<()> {
     let a = read_x_arg(sim, &args[1])?;
     let b = read_x_arg(sim, &args[2])?;
-    let value = compute_rm(a, b, kind)?;
+    let value = compute_rm(a, b, kind, &sim.regs)?;
     write_x(sim, &args[0], value, false)
 }
 
@@ -337,7 +354,7 @@ fn type_w(sim: &mut Simulator, args: &[String], kind: WKind) -> SimResult<()> {
 
 /// `EBREAK`: advance past the instruction and halt with `ebreak\n`.
 fn ebreak(sim: &mut Simulator) -> SimResult<()> {
-    sim.regs.pc = sim.regs.pc.wrapping_add(4);
+    sim.regs.pc = sim.regs.normalize(sim.regs.pc.wrapping_add(4));
     Err(SimError("ebreak\n".to_string()))
 }
 
@@ -449,7 +466,9 @@ fn jal(sim: &mut Simulator, args: &[String]) -> SimResult<()> {
     let ret = sim.regs.pc;
     write_x(sim, &args[0], ret, true)?;
     let off = imm20(&args[1])?;
-    sim.regs.pc = sim.regs.pc.wrapping_add((off << 1) as u64).wrapping_sub(4);
+    sim.regs.pc = sim
+        .regs
+        .normalize(sim.regs.pc.wrapping_add((off << 1) as u64).wrapping_sub(4));
     Ok(())
 }
 
@@ -458,7 +477,7 @@ fn jalr(sim: &mut Simulator, args: &[String]) -> SimResult<()> {
     write_x(sim, &args[0], ret, true)?;
     let base = read_x_arg(sim, &args[1])?;
     let imm = imm_raw(&args[2])?;
-    sim.regs.pc = base.wrapping_add(imm);
+    sim.regs.pc = sim.regs.normalize(base.wrapping_add(imm));
     Ok(())
 }
 
@@ -485,7 +504,7 @@ fn execute_fast(sim: &mut Simulator, dec: DecodedInstr) -> SimResult<bool> {
         } => {
             let a = sim.regs.read_x(rs1);
             let b = sim.regs.read_x(rs2);
-            let value = alu(op, a, b, unsigned)?;
+            let value = alu(op, a, b, unsigned, &sim.regs)?;
             sim.regs.write_x(rd, value, true);
             Ok(false)
         }
@@ -503,9 +522,9 @@ fn execute_fast(sim: &mut Simulator, dec: DecodedInstr) -> SimResult<bool> {
                 } else {
                     imm as u64
                 };
-                alu(op, a, imm_u, true)?
+                alu(op, a, imm_u, true, &sim.regs)?
             } else {
-                alu(op, a, imm as u64, false)?
+                alu(op, a, imm as u64, false, &sim.regs)?
             };
             sim.regs.write_x(rd, value, true);
             Ok(false)
@@ -530,7 +549,7 @@ fn execute_fast(sim: &mut Simulator, dec: DecodedInstr) -> SimResult<bool> {
         DecodedInstr::AluRM { rd, rs1, rs2, kind } => {
             let a = sim.regs.read_x(rs1);
             let b = sim.regs.read_x(rs2);
-            let value = compute_rm(a, b, kind)?;
+            let value = compute_rm(a, b, kind, &sim.regs)?;
             sim.regs.write_x(rd, value, false);
             Ok(false)
         }
@@ -546,13 +565,15 @@ fn execute_fast(sim: &mut Simulator, dec: DecodedInstr) -> SimResult<bool> {
             let taken = match (op, unsigned) {
                 (BranchOp::Eq, _) => a == b,
                 (BranchOp::Ne, _) => a != b,
-                (BranchOp::Ge, false) => a as i64 >= b as i64,
+                (BranchOp::Ge, false) => sim.regs.signed(a) >= sim.regs.signed(b),
                 (BranchOp::Ge, true) | (BranchOp::GeU, _) => a >= b,
-                (BranchOp::Lt, false) => (a as i64) < (b as i64),
+                (BranchOp::Lt, false) => sim.regs.signed(a) < sim.regs.signed(b),
                 (BranchOp::Lt, true) | (BranchOp::LtU, _) => a < b,
             };
             if taken {
-                sim.regs.pc = sim.regs.pc.wrapping_add((off << 1) as u64).wrapping_sub(4);
+                sim.regs.pc = sim
+                    .regs
+                    .normalize(sim.regs.pc.wrapping_add((off << 1) as u64).wrapping_sub(4));
             }
             Ok(false)
         }
@@ -564,7 +585,7 @@ fn execute_fast(sim: &mut Simulator, dec: DecodedInstr) -> SimResult<bool> {
             unsigned,
         } => {
             let base = sim.regs.read_x(rs1);
-            let addr = base.wrapping_add(offset as u64);
+            let addr = sim.regs.normalize(base.wrapping_add(offset as u64));
             let bits = sim.mem.read_bytes(addr, nbytes as usize)?;
             let value = if !unsigned && nbytes < 8 && (bits >> (nbytes * 8 - 1)) & 1 == 1 {
                 bits | !((1u64 << (nbytes * 8)) - 1)
@@ -581,7 +602,7 @@ fn execute_fast(sim: &mut Simulator, dec: DecodedInstr) -> SimResult<bool> {
             nbytes,
         } => {
             let base = sim.regs.read_x(rs2);
-            let addr = base.wrapping_add(offset as u64);
+            let addr = sim.regs.normalize(base.wrapping_add(offset as u64));
             let reg_val = sim.regs.read_x(rs1);
             let mask = if nbytes == 8 {
                 u64::MAX
@@ -596,14 +617,16 @@ fn execute_fast(sim: &mut Simulator, dec: DecodedInstr) -> SimResult<bool> {
         DecodedInstr::Jal { rd, off } => {
             let ret = sim.regs.pc;
             sim.regs.write_x(rd, ret, true);
-            sim.regs.pc = sim.regs.pc.wrapping_add((off << 1) as u64).wrapping_sub(4);
+            sim.regs.pc = sim
+                .regs
+                .normalize(sim.regs.pc.wrapping_add((off << 1) as u64).wrapping_sub(4));
             Ok(false)
         }
         DecodedInstr::Jalr { rd, rs1, imm } => {
             let ret = sim.regs.pc;
             sim.regs.write_x(rd, ret, true);
             let base = sim.regs.read_x(rs1);
-            sim.regs.pc = base.wrapping_add(imm);
+            sim.regs.pc = sim.regs.normalize(base.wrapping_add(imm));
             Ok(false)
         }
         DecodedInstr::Lui { rd, imm } => {
@@ -630,11 +653,13 @@ pub fn step(sim: &mut Simulator) -> StepResult {
     let inst_pc = sim.regs.pc;
     if sim.return_sentinel == Some(inst_pc) {
         let a0 = sim.regs.read_x(10);
-        sim.exec_log
-            .push_str(&format!("RETURN (a0 = {} / 0x{a0:x})\n", a0 as i64));
+        sim.exec_log.push_str(&format!(
+            "RETURN (a0 = {} / 0x{a0:x})\n",
+            sim.regs.signed(a0)
+        ));
         return StepResult::Halted;
     }
-    sim.regs.pc = inst_pc.wrapping_add(4);
+    sim.regs.pc = sim.regs.normalize(inst_pc.wrapping_add(4));
 
     let (decoded, is_err) = match sim.mem.cells.get(&inst_pc) {
         Some(MemoryCell::Instruction(c)) => {
@@ -718,7 +743,7 @@ pub fn step(sim: &mut Simulator) -> StepResult {
                 let is_ebreak = e.0 == "ebreak\n";
                 if is_ebreak {
                     sim.exec_log.push_str("ebreak\n");
-                    sim.regs.pc = sim.regs.pc.wrapping_sub(4);
+                    sim.regs.pc = sim.regs.normalize(sim.regs.pc.wrapping_sub(4));
                 } else {
                     sim.exec_log.push_str(&format!("ERROR: {}\n", e.0));
                     sim.last_error.get_or_insert_with(|| e.0.clone());
@@ -747,7 +772,7 @@ pub fn step(sim: &mut Simulator) -> StepResult {
                 let is_ebreak = e.0 == "ebreak\n";
                 if is_ebreak {
                     sim.exec_log.push_str("ebreak\n");
-                    sim.regs.pc = sim.regs.pc.wrapping_sub(4);
+                    sim.regs.pc = sim.regs.normalize(sim.regs.pc.wrapping_sub(4));
                 } else {
                     sim.exec_log.push_str(&format!("ERROR: {}\n", e.0));
                     sim.last_error.get_or_insert_with(|| e.0.clone());
@@ -791,7 +816,7 @@ pub fn step(sim: &mut Simulator) -> StepResult {
     match decoded {
         Some(DecodedInstr::Branch { .. }) => {
             sim.metrics.branches_total += 1;
-            if sim.regs.pc != inst_pc.wrapping_add(4) {
+            if sim.regs.pc != sim.regs.normalize(inst_pc.wrapping_add(4)) {
                 sim.metrics.branches_taken += 1;
                 sim.metrics.cycles += 1;
             }
@@ -862,5 +887,36 @@ pub fn run(sim: &mut Simulator, timeout_ms: u64) -> RunStatus {
         RunStatus::TimedOut
     } else {
         RunStatus::Completed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rv32_fast_and_text_paths_agree() {
+        for (op, a, b, expected) in [
+            ("ADD", 0xffff_ffff, 1, 0),
+            ("SLT", 0xffff_ffff, 0, 1),
+            ("SLTU", 0xffff_ffff, 0, 0),
+            ("SRA", 0x8000_0000, 1, 0xc000_0000),
+            ("MULH", 0xffff_ffff, 2, 0xffff_ffff),
+            ("DIV", 0xffff_fff9, 3, 0xffff_fffd),
+            ("SLL", 1, 128, 0),
+            ("REM", 0xffff_fff9, 3, 2),
+        ] {
+            let args = vec!["x3".into(), "x1".into(), "x2".into()];
+            let mut slow = Simulator::new();
+            slow.regs.set_xlen(Xlen::X32);
+            slow.regs.write_x(1, a, false);
+            slow.regs.write_x(2, b, false);
+            let mut fast = Simulator::new();
+            fast.regs = slow.regs.clone();
+            execute(&mut slow, op, &args).unwrap();
+            execute_fast(&mut fast, rvs_sim::decode_instruction(op, &args).unwrap()).unwrap();
+            assert_eq!(slow.regs.read_x(3), expected, "{op}");
+            assert_eq!(fast.regs.read_x(3), expected, "{op}");
+        }
     }
 }

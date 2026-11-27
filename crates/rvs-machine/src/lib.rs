@@ -180,6 +180,13 @@ pub struct ViewRequest {
 // Execution and diagnostics
 // ---------------------------------------------------------------------------
 
+/// Integer execution width, when supported by the backend.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExecutionWidth {
+    Bits32,
+    Bits64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StepOutcome {
     Continued,
@@ -291,6 +298,16 @@ pub trait Machine: Sized {
 
     /// Reset machine state, preserving nothing (the app restores UI flags).
     fn reset(&mut self);
+
+    /// Current integer execution width, or `None` if unsupported.
+    fn execution_width(&self) -> Option<ExecutionWidth> {
+        None
+    }
+
+    /// Select an integer execution width; returns whether it is supported.
+    fn set_execution_width(&mut self, _width: ExecutionWidth) -> bool {
+        false
+    }
 
     /// Set the source buffer without assembling it.
     fn set_source(&mut self, _source: &str) {}

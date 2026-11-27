@@ -5,6 +5,7 @@ members = [
   "crates/rvs-regs",
   "crates/rvs-memory",
   "crates/rvs-transpile",
+  "crates/rvs-transpile-expr",
   "crates/rvs-sim",
   "crates/rvs-asm-syntax",
   "crates/rvs-assembler",

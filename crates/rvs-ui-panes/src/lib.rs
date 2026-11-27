@@ -127,11 +127,15 @@ pub fn draw_source<M: Machine>(f: &mut Frame, app: &mut App<M>, area: Rect) {
     let dialect = app.machine.dialect();
     let is_rvs = dialect == rvs_machine::Dialect::Rvs;
     let is_gnu = dialect == rvs_machine::Dialect::Gnu;
-    let toolbar = Line::from(vec![
-        pill("RVS", is_rvs),
-        pill("GNU", is_gnu),
-        btn("TRANSPILE"),
-    ]);
+    let mut toolbar = vec![pill("RVS", is_rvs), pill("GNU", is_gnu), btn("TRANSPILE")];
+    if let Some(width) = app.machine.execution_width() {
+        let label = match width {
+            rvs_machine::ExecutionWidth::Bits32 => "RV32",
+            rvs_machine::ExecutionWidth::Bits64 => "RV64",
+        };
+        toolbar.push(btn(label));
+    }
+    let toolbar = Line::from(toolbar);
     f.render_widget(Paragraph::new(toolbar), toolbar_area);
 
     if active && (app.mode == Mode::Edit || app.mode == Mode::Normal) && app.modal == Modal::None {
@@ -165,7 +169,13 @@ pub fn draw_listing<M: Machine>(f: &mut Frame, app: &mut App<M>, view: &ViewStat
     let spd_label = format!("SPD:{}", app.run_speed.label());
     let toolbar = Line::from(vec![
         btn("InitPC"),
-        Span::styled(format!(" PC:0x{:016x} ", view.pc), rvs_theme::TEXT_STYLE),
+        Span::styled(
+            match app.machine.execution_width() {
+                Some(rvs_machine::ExecutionWidth::Bits32) => format!(" PC:0x{:08x} ", view.pc),
+                _ => format!(" PC:0x{:016x} ", view.pc),
+            },
+            rvs_theme::TEXT_STYLE,
+        ),
         pill("TXT", app.view.exec_txt),
         pill("CLR", app.colorize_listing),
         pill(&spd_label, app.run_speed != rvs_app::RunSpeed::Max),

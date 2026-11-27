@@ -11,3 +11,4 @@ workspace = true
 [dependencies]
 rvs-tcl = { path = "../rvs-tcl" }
 rvs-memory = { path = "../rvs-memory" }
+rvs-regs = { path = "../rvs-regs" }

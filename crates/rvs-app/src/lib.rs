@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 
 use rvs_editor::Editor;
 use rvs_machine::{
-    Dialect, LoadOutcome, Machine, RegisterChanges, StepOutcome, ViewFlags, ViewRequest,
+    Dialect, ExecutionWidth, LoadOutcome, Machine, RegisterChanges, StepOutcome, ViewFlags,
+    ViewRequest,
 };
 
 /// Parse one batch-entry line: `<asm> <in> <out> [timeout_ms]`.
@@ -316,12 +317,23 @@ impl<M: Machine> App<M> {
     pub fn reset_sim_panes(&mut self) {
         let dialect = self.machine.dialect();
         let convention = self.machine.convention_enabled();
+        let width = self.machine.execution_width();
+        let a7_abi = self.machine.a7_abi();
         self.machine.reset();
         self.machine.set_dialect(dialect);
         self.machine.set_convention_enabled(convention);
+        if let Some(width) = width {
+            self.machine.set_execution_width(width);
+        }
+        self.machine.set_a7_abi(a7_abi);
         self.machine.set_source(&self.editor.text());
         self.running = false;
         self.was_running = false;
+        if matches!(self.mode, Mode::Running | Mode::Input) {
+            self.mode = Mode::Normal;
+        }
+        self.at_breakpoint = false;
+        self.last_step_halted = false;
         self.dma_out_available = false;
         self.dma_inp_available = false;
         self.input_line.clear();
@@ -462,6 +474,10 @@ impl<M: Machine> App<M> {
             return;
         }
         let target = self.machine.pc().wrapping_add(4);
+        let target = match self.machine.execution_width() {
+            Some(ExecutionWidth::Bits32) => u64::from(target as u32),
+            _ => target,
+        };
         self.run_until(target, "Step over");
     }
 

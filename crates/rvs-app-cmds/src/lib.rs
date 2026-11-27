@@ -7,7 +7,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use rvs_app::{App, ConfirmAction, FileAction, Modal, Mode, Pane, RunSpeed};
-use rvs_machine::{Dialect, Machine};
+use rvs_machine::{Dialect, ExecutionWidth, Machine};
 
 pub trait AppCommands {
     fn on_key_command(&mut self, key: KeyEvent);
@@ -25,6 +25,34 @@ pub trait AppCommands {
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     ) -> Result<(), Box<dyn std::error::Error>>;
+}
+
+fn set_execution_width<M: Machine>(app: &mut App<M>, requested: Option<ExecutionWidth>) {
+    match app.machine.execution_width() {
+        None => app.status = "ERROR: execution width unsupported by this backend".to_string(),
+        Some(current) => {
+            let width = requested.unwrap_or(current);
+            if width != current {
+                if !app.machine.set_execution_width(width) {
+                    app.status = "ERROR: execution width unsupported by this backend".to_string();
+                    return;
+                }
+                app.reset_sim_panes();
+                app.compile();
+                if app.status.starts_with("ERROR:") {
+                    return;
+                }
+            }
+            app.status = format!(
+                "Execution width: {}",
+                match width {
+                    ExecutionWidth::Bits32 => "RV32",
+                    ExecutionWidth::Bits64 => "RV64",
+                }
+            );
+            app.needs_full_clear = true;
+        }
+    }
 }
 
 /// Create a private temp buffer whose path ends in `.s`, so editors still
@@ -200,6 +228,18 @@ impl<M: Machine> AppCommands for App<M> {
             },
             "cwatch" | "clearwatch" | "clearwatchpoints" => self.clear_watchpoints(),
             "abi" => self.set_abi(args),
+            "xlen" => {
+                let requested = match args {
+                    "" => None,
+                    "32" => Some(ExecutionWidth::Bits32),
+                    "64" => Some(ExecutionWidth::Bits64),
+                    _ => {
+                        self.status = "ERROR: usage: :xlen [32|64]".to_string();
+                        return;
+                    }
+                };
+                set_execution_width(self, requested);
+            }
             "r" | "run" => self.action_run(),
             "stop" | "halt" => self.action_stop(),
             "reset" | "initpc" => self.reset_pc(),
@@ -599,6 +639,15 @@ impl<M: Machine> AppCommands for App<M> {
                 self.machine.set_dialect(target);
                 self.status = format!("Transpiled buffer to {} and switched mode", target.name());
                 self.needs_full_clear = true;
+            }
+            (Pane::Source, 4) => {
+                if let Some(current) = self.machine.execution_width() {
+                    let next = match current {
+                        ExecutionWidth::Bits32 => ExecutionWidth::Bits64,
+                        ExecutionWidth::Bits64 => ExecutionWidth::Bits32,
+                    };
+                    set_execution_width(self, Some(next));
+                }
             }
             _ => {}
         }

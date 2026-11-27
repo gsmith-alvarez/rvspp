@@ -12,7 +12,7 @@ expression: terminal.backend().to_string()
 "║                                      ║│                                      │"
 "║                                      ║│                                      │"
 "║                                      ║│                                      │"
-"║ [RVS]  [GNU]  [TRANSPILE]            ║│ [InitPC]  PC:0x0000000000000000  [TXT│"
+"║ [RVS]  [GNU]  [TRANSPILE]  [RV64]    ║│ [InitPC]  PC:0x0000000000000000  [TXT│"
 "╚══════════════════════════════════════╝└──────────────────────────────────────┘"
 "┌ Regs ────────────┐┌ Mem ─────────────┐┌ Exec ────────────┐┌ OUT ─────────────┐"
 "│INT Regs          ││MEMORY            ││                  ││                  │"
